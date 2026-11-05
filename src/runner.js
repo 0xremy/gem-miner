@@ -4,6 +4,13 @@ import { fileURLToPath } from "node:url";
 import { loadWallets, describeProxy } from "./wallets.js";
 import { checkPositions, claimReady, startMine } from "./app.js";
 import { userBalance } from "./features/balance.js";
+import {
+  AUTO_QUESTS,
+  findQuest,
+  listQuests,
+  secondsUntilReset,
+  startQuest,
+} from "./features/quests.js";
 import { DEFAULT_LOCATION, costOf, powerOf, describeMine } from "./mines.js";
 
 /** Default gap between cycles; the dashboard can change it at runtime. */
@@ -21,6 +28,11 @@ const settingsPath = fileURLToPath(new URL("../data/settings.json", import.meta.
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const short = (address) => `${address.slice(0, 6)}…${address.slice(-4)}`;
+const reasonOf = (error) => {
+  const body = error?.body;
+  const detail = typeof body === "string" ? body : body?.error || body?.message;
+  return detail ? `${error.message} — ${detail}` : error.message;
+};
 
 function readIntervalMinutes() {
   try {
@@ -54,7 +66,7 @@ export const state = {
   /** Auto-run is off until someone turns it on: nothing runs on boot. */
   loop: { enabled: false, intervalMinutes: readIntervalMinutes() },
   wallets: [],
-  totals: { claimed: 0, gems: 0, started: 0 },
+  totals: { claimed: 0, gems: 0, started: 0, quests: 0, questGems: 0 },
   log: [],
 };
 
@@ -84,11 +96,112 @@ function newRow(wallet) {
     claimed: 0,
     claimedGems: 0,
     started: 0,
+    quests: [],
+    questsClaimed: 0,
+    questGems: 0,
     status: "running",
     note: null,
     error: null,
     durationMs: null,
   };
+}
+
+/**
+ * Daily/weekly/social quests, driven by GET /api/quests.
+ * A quest that is `available` is started; the API claims it by itself after
+ * `delaySeconds`. We only wait (and re-read once) when something was started,
+ * so an ordinary cycle pays one cheap request per wallet.
+ */
+async function runQuests(wallet, row) {
+  let quests;
+  try {
+    quests = await listQuests(wallet, { verbose: false });
+  } catch (error) {
+    log(`[${row.label}] quests unavailable: ${reasonOf(error)}`, "bad");
+    return;
+  }
+
+  const pending = [];
+
+  for (const { id, label } of AUTO_QUESTS) {
+    const quest = findQuest(quests, id);
+    if (!quest) {
+      log(`[${row.label}] quest ${label}: not offered on this account`);
+      continue;
+    }
+
+    if (quest.status === "claimed") {
+      const left = secondsUntilReset(quests, quest.period ?? "daily");
+      row.quests.push({ id, label, status: "claimed", note: "already claimed", gems: 0 });
+      log(
+        `[${row.label}] quest ${label}: already claimed` +
+          (left ? ` — resets in ${(left / 3600).toFixed(1)}h` : ""),
+      );
+      continue;
+    }
+
+    if (quest.status === "started") {
+      const seconds = Number(quest.secondsLeft ?? quest.delaySeconds ?? 0);
+      pending.push({ id, label, delaySeconds: seconds });
+      row.quests.push({ id, label, status: "started", note: `${seconds}s left`, gems: 0 });
+      log(`[${row.label}] quest ${label}: already in progress (${seconds}s left)`);
+      continue;
+    }
+
+    try {
+      const started = await startQuest(wallet, id, { verbose: false });
+      const seconds = Number(started.delaySeconds ?? quest.delaySeconds ?? 0);
+      pending.push({ id, label, delaySeconds: seconds });
+      row.quests.push({
+        id,
+        label,
+        status: started.status ?? "started",
+        note: `${seconds}s delay`,
+        gems: 0,
+      });
+      log(`[${row.label}] quest ${label}: started (${seconds}s delay)`, "ok");
+    } catch (error) {
+      row.quests.push({ id, label, status: "error", note: reasonOf(error), gems: 0 });
+      log(`[${row.label}] quest ${label} failed: ${reasonOf(error)}`, "bad");
+    }
+  }
+
+  if (pending.length === 0) return;
+
+  const waitMs = Math.max(...pending.map((item) => item.delaySeconds * 1000)) + 1200;
+  await sleep(waitMs);
+
+  let after;
+  try {
+    after = await listQuests(wallet, { verbose: false });
+  } catch (error) {
+    log(`[${row.label}] quest check failed: ${reasonOf(error)}`, "bad");
+    return;
+  }
+
+  for (const item of pending) {
+    const quest = findQuest(after, item.id);
+    const entry = row.quests.find((q) => q.id === item.id);
+    if (!quest) continue;
+
+    if (quest.status === "claimed") {
+      const gems = Number(quest.rewardGems ?? 0);
+      row.questsClaimed += 1;
+      row.questGems += gems;
+      if (entry) {
+        entry.status = "claimed";
+        entry.gems = gems;
+        entry.note = "claimed";
+      }
+      log(`[${row.label}] quest ${item.label}: claimed +${gems} gems`, "ok");
+    } else {
+      if (entry) entry.status = quest.status ?? "unknown";
+      log(
+        `[${row.label}] quest ${item.label}: still ${quest.status ?? "unknown"} after ` +
+          `${(waitMs / 1000).toFixed(0)}s`,
+      );
+    }
+  }
 }
 
 /**
@@ -175,6 +288,9 @@ async function runOne(wallet) {
       }
     }
 
+    // 4. Quests (daily check-in, ...) — last, so a quest hiccup never blocks mining.
+    await runQuests(wallet, row);
+
     row.status = row.error ? "error" : "ok";
   } catch (error) {
     row.status = "error";
@@ -234,15 +350,18 @@ export async function runCycle({ reason = "manual" } = {}) {
         claimed: totals.claimed + row.claimed,
         gems: totals.gems + row.claimedGems,
         started: totals.started + row.started,
+        quests: totals.quests + row.questsClaimed,
+        questGems: totals.questGems + row.questGems,
       }),
-      { claimed: 0, gems: 0, started: 0 },
+      { claimed: 0, gems: 0, started: 0, quests: 0, questGems: 0 },
     );
 
     state.lastRunAt = new Date().toISOString();
     state.lastDurationMs = Date.now() - startedAt;
     log(
       `cycle finished in ${(state.lastDurationMs / 1000).toFixed(1)}s: ` +
-        `${state.totals.claimed} claimed, ${state.totals.gems.toFixed(2)} gems, ${state.totals.started} started`,
+        `${state.totals.claimed} claimed, ${state.totals.gems.toFixed(2)} gems, ${state.totals.started} started, ` +
+        `${state.totals.quests} quest(s) +${state.totals.questGems} gems`,
       "ok",
     );
     return state;

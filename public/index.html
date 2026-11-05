@@ -153,6 +153,7 @@
     <span class="chip">claimed <b id="chipClaimed">–</b></span>
     <span class="chip">gems <b id="chipGems">–</b></span>
     <span class="chip">started <b id="chipStarted">–</b></span>
+    <span class="chip">quests <b id="chipQuests">–</b></span>
     <span class="chip" id="chipState">idle</span>
     <span class="chip" id="chipNext">auto-run off</span>
   </div>
@@ -187,11 +188,12 @@
           <th>Claimed</th>
           <th>Gems</th>
           <th>Started</th>
+          <th>Quests</th>
           <th>Status</th>
         </tr>
       </thead>
       <tbody id="rows">
-        <tr><td colspan="10" class="muted">click Run now to check the wallets</td></tr>
+        <tr><td colspan="11" class="muted">click Run now to check the wallets</td></tr>
       </tbody>
       <tfoot>
         <tr>
@@ -204,6 +206,7 @@
           <td class="num" id="footClaimed">–</td>
           <td class="num ok" id="footGems">–</td>
           <td class="num" id="footStarted">–</td>
+          <td class="num" id="footQuests">–</td>
           <td class="sub" id="footRun">–</td>
         </tr>
       </tfoot>
@@ -261,7 +264,7 @@ function countdown() {
 function renderRows(wallets) {
   const tbody = $("rows");
   if (!wallets.length) {
-    tbody.innerHTML = `<tr><td colspan="10" class="muted">click Run now to check the wallets</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="muted">click Run now to check the wallets</td></tr>`;
     return;
   }
 
@@ -281,6 +284,12 @@ function renderRows(wallets) {
           ? "–"
           : `${num(w.energy)}<span class="sub">${w.energyCapacity ? ` / ${num(w.energyCapacity)}` : ""}</span>`;
 
+      const quests = w.quests ?? [];
+      const questCell = quests.length
+        ? `${num(w.questsClaimed)}<span class="sub">${w.questGems ? ` +${num(w.questGems)}` : ""}</span>` +
+          `<div class="sub">${esc(quests.map((q) => `${q.label}: ${q.status}`).join(" · "))}</div>`
+        : "–";
+
       return `
         <tr class="${w.status === "error" ? "error" : ""}">
           <td>
@@ -298,6 +307,7 @@ function renderRows(wallets) {
           <td class="num">${num(w.claimed)}</td>
           <td class="num ok">${typeof w.claimedGems === "number" ? w.claimedGems.toFixed(2) : "–"}</td>
           <td class="num">${num(w.started)}</td>
+          <td>${questCell}</td>
           <td>${status}</td>
         </tr>`;
     })
@@ -319,6 +329,9 @@ function render() {
   $("chipClaimed").textContent = report.totals.claimed;
   $("chipGems").textContent = report.totals.gems.toFixed(2);
   $("chipStarted").textContent = report.totals.started;
+  $("chipQuests").textContent = report.totals.quests
+    ? `${report.totals.quests} (+${report.totals.questGems})`
+    : report.totals.quests;
 
   const stateChip = $("chipState");
   if (report.running) {
@@ -358,6 +371,7 @@ function render() {
   $("footClaimed").textContent = num(report.totals.claimed);
   $("footGems").textContent = report.totals.gems.toFixed(2);
   $("footStarted").textContent = num(report.totals.started);
+  $("footQuests").textContent = `${num(report.totals.quests)} (+${num(report.totals.questGems)})`;
   $("footRun").textContent = report.lastRunAt
     ? `${report.wallets.length} wallets · ${loop.enabled ? `loop every ${loop.intervalMinutes} min` : "manual"}`
     : `${loop.enabled ? `loop every ${loop.intervalMinutes} min` : "manual"}`;
