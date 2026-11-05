@@ -19,8 +19,8 @@ export async function listQuests(wallet, { verbose = true } = {}) {
 }
 
 /**
- * Feature 4 — start a quest. The API arms it for `delaySeconds`, then claims it
- * by itself; there is no separate "complete" call.
+ * Feature 4 — start a quest. The API arms it for `delaySeconds`; afterwards the
+ * reward has to be collected with POST /api/quests/claim.
  *
  *   POST /api/quests/start   { "questId": "daily_miner_signin" }
  */
@@ -30,6 +30,26 @@ export async function startQuest(wallet, questId, { verbose = true } = {}) {
     method: "POST",
     path: "/api/quests/start",
     payload: { questId },
+    wallet,
+    verbose,
+  });
+  return body ?? {};
+}
+
+/**
+ * Feature 4b — collect a started quest once its delay has passed.
+ *
+ *   POST /api/quests/claim   { "questId": "daily_miner_signin", "tweetUrl": "" }
+ *   → { success, message, reward: { gems, xp }, user: { gems, energy, ... } }
+ *
+ * `tweetUrl` is required by the body shape but empty for every non-social quest.
+ */
+export async function claimQuest(wallet, questId, { tweetUrl = "", verbose = true } = {}) {
+  if (!questId) throw new Error("claimQuest needs a quest id");
+  const { body } = await request({
+    method: "POST",
+    path: "/api/quests/claim",
+    payload: { questId, tweetUrl },
     wallet,
     verbose,
   });

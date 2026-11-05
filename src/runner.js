@@ -6,6 +6,7 @@ import { checkPositions, claimReady, startMine } from "./app.js";
 import { userBalance } from "./features/balance.js";
 import {
   AUTO_QUESTS,
+  claimQuest,
   findQuest,
   listQuests,
   secondsUntilReset,
@@ -108,9 +109,10 @@ function newRow(wallet) {
 
 /**
  * Daily/weekly/social quests, driven by GET /api/quests.
- * A quest that is `available` is started; the API claims it by itself after
- * `delaySeconds`. We only wait (and re-read once) when something was started,
- * so an ordinary cycle pays one cheap request per wallet.
+ * A quest that is `available` is started, then claimed with
+ * POST /api/quests/claim once its `delaySeconds` has passed. Nothing is waited
+ * on unless a quest was actually started, so an ordinary cycle pays one cheap
+ * request per wallet.
  */
 async function runQuests(wallet, row) {
   let quests;
@@ -168,39 +170,57 @@ async function runQuests(wallet, row) {
 
   if (pending.length === 0) return;
 
-  const waitMs = Math.max(...pending.map((item) => item.delaySeconds * 1000)) + 1200;
+  const waitMs = Math.max(...pending.map((item) => item.delaySeconds * 1000)) + 1500;
   await sleep(waitMs);
 
-  let after;
-  try {
-    after = await listQuests(wallet, { verbose: false });
-  } catch (error) {
-    log(`[${row.label}] quest check failed: ${reasonOf(error)}`, "bad");
-    return;
-  }
-
   for (const item of pending) {
-    const quest = findQuest(after, item.id);
     const entry = row.quests.find((q) => q.id === item.id);
-    if (!quest) continue;
 
-    if (quest.status === "claimed") {
-      const gems = Number(quest.rewardGems ?? 0);
+    try {
+      const claimed = await claimQuest(wallet, item.id, { verbose: false });
+      const gems = Number(claimed.reward?.gems ?? 0);
       row.questsClaimed += 1;
       row.questGems += gems;
+      if (typeof claimed.user?.gems === "number") row.gemsBalance = claimed.user.gems;
       if (entry) {
         entry.status = "claimed";
         entry.gems = gems;
         entry.note = "claimed";
       }
-      log(`[${row.label}] quest ${item.label}: claimed +${gems} gems`, "ok");
-    } else {
-      if (entry) entry.status = quest.status ?? "unknown";
       log(
-        `[${row.label}] quest ${item.label}: still ${quest.status ?? "unknown"} after ` +
-          `${(waitMs / 1000).toFixed(0)}s`,
+        `[${row.label}] quest ${item.label}: ${claimed.message ?? `claimed +${gems} gems`}`,
+        "ok",
       );
+      continue;
+    } catch (error) {
+      if (entry) {
+        entry.status = "error";
+        entry.note = reasonOf(error);
+      }
+      log(`[${row.label}] quest ${item.label} claim failed: ${reasonOf(error)}`, "bad");
     }
+
+    // The claim was refused (still cooling down, or already collected) — read the
+    // quest list once so the row shows what actually happened.
+    let after;
+    try {
+      after = await listQuests(wallet, { verbose: false });
+    } catch {
+      continue;
+    }
+
+    const quest = findQuest(after, item.id);
+    if (quest?.status !== "claimed") continue;
+
+    const gems = Number(quest.rewardGems ?? 0);
+    row.questsClaimed += 1;
+    row.questGems += gems;
+    if (entry) {
+      entry.status = "claimed";
+      entry.gems = gems;
+      entry.note = "claimed";
+    }
+    log(`[${row.label}] quest ${item.label}: already claimed +${gems} gems`, "ok");
   }
 }
 
