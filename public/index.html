@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gem Miner — report</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121821;
+    --line: #1f2937;
+    --text: #e6edf6;
+    --muted: #8b98ab;
+    --ok: #55d68a;
+    --danger: #ff6b6b;
+    --warn: #f5c451;
+    --accent: #4ea8ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 ui-sans-serif, system-ui, segoe UI, sans-serif;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #121821, #0e141c);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+  h1 { font-size: 16px; margin: 0 8px 0 0; letter-spacing: 0.02em; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .chip b { color: var(--text); font-weight: 600; }
+  .chip.live b { color: var(--ok); }
+  .chip.off b { color: var(--warn); }
+  .spacer { flex: 1; }
+  button {
+    background: #1b2430;
+    color: var(--text);
+    border: 1px solid #2b3a4d;
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.primary { background: #14406b; border-color: #1f5b96; }
+  button.active { background: #1d3a2a; border-color: #2f6b46; }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--line);
+    background: #0e141c;
+  }
+  .toolbar label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .toolbar input[type="number"] {
+    width: 74px;
+    background: #0b1119;
+    color: var(--text);
+    border: 1px solid #2b3a4d;
+    border-radius: 8px;
+    padding: 6px 8px;
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+  }
+  .toolbar input[type="number"]:focus { outline: 1px solid var(--accent); }
+  .toolbar .note { font-size: 12px; color: var(--muted); }
+  .toolbar .note.ok { color: var(--ok); }
+  .toolbar .note.bad { color: var(--danger); }
+  .toolbar .divider { width: 1px; height: 22px; background: var(--line); }
+  main { padding: 18px 20px 8px; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 980px; }
+  th, td { padding: 9px 12px; text-align: right; border-bottom: 1px solid #17202c; white-space: nowrap; }
+  th {
+    background: #101720;
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+  }
+  th:first-child, td:first-child { text-align: left; }
+  th:nth-child(2), td:nth-child(2) { text-align: left; }
+  th:last-child, td:last-child { text-align: left; white-space: normal; }
+  tbody tr:hover { background: #0f1620; }
+  tbody tr.error td { background: #241416; }
+  tfoot td { border-top: 2px solid var(--line); font-weight: 600; background: #101720; }
+  .name { font-weight: 600; }
+  .sub { color: var(--muted); font-size: 11px; }
+  .num { font-variant-numeric: tabular-nums; }
+  .ok { color: var(--ok); }
+  .bad { color: var(--danger); }
+  .warn { color: var(--warn); }
+  .muted { color: var(--muted); }
+  .running { color: var(--accent); }
+  #logPanel { padding: 12px 20px 26px; }
+  #logPanel h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 12px 0 8px;
+  }
+  #log {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    max-height: 260px;
+    overflow: auto;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+  }
+  #log div { padding: 5px 12px; border-bottom: 1px solid #1c232c; color: var(--muted); }
+  #log div:last-child { border-bottom: 0; }
+  #log .ok { color: #9ee6b8; }
+  #log .bad { color: var(--danger); }
+  #log time { color: #56637a; margin-right: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Gem Miner</h1>
+  <div class="chips">
+    <span class="chip">wallets <b id="chipWallets">–</b></span>
+    <span class="chip">claimed <b id="chipClaimed">–</b></span>
+    <span class="chip">gems <b id="chipGems">–</b></span>
+    <span class="chip">started <b id="chipStarted">–</b></span>
+    <span class="chip" id="chipState">idle</span>
+    <span class="chip" id="chipNext">auto-run off</span>
+  </div>
+  <span class="spacer"></span>
+  <button id="runNow" class="primary">Run now</button>
+  <button id="refresh">Refresh</button>
+</header>
+
+<div class="toolbar">
+  <button id="uploadBtn">Upload wallets.xlsx</button>
+  <input id="walletsFile" type="file" accept=".xlsx" hidden />
+  <span class="note" id="walletsInfo">no sheet loaded</span>
+  <span class="divider"></span>
+  <label for="interval">Loop every</label>
+  <input id="interval" type="number" min="1" max="1440" step="1" value="10" />
+  <span class="note">min</span>
+  <button id="loopBtn">Start loop</button>
+  <span class="note" id="loopInfo">auto-run off</span>
+</div>
+
+<main>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Wallet</th>
+          <th>Mine</th>
+          <th>Energy</th>
+          <th>Power</th>
+          <th>Open</th>
+          <th>Ready</th>
+          <th>Claimed</th>
+          <th>Gems</th>
+          <th>Started</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="10" class="muted">click Run now to check the wallets</td></tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>total</td>
+          <td class="sub" id="footMines">–</td>
+          <td class="num" id="footEnergy">–</td>
+          <td></td>
+          <td class="num" id="footOpen">–</td>
+          <td class="num" id="footReady">–</td>
+          <td class="num" id="footClaimed">–</td>
+          <td class="num ok" id="footGems">–</td>
+          <td class="num" id="footStarted">–</td>
+          <td class="sub" id="footRun">–</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</main>
+
+<div id="logPanel">
+  <h2>Activity</h2>
+  <div id="log"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let report = null;
+
+const esc = (value) =>
+  String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const num = (value) => (typeof value === "number" ? value.toLocaleString() : "–");
+const time = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour12: false }) : "–");
+const dur = (ms) => (typeof ms === "number" ? `${(ms / 1000).toFixed(1)}s` : "–");
+const kb = (bytes) => (typeof bytes === "number" ? `${(bytes / 1024).toFixed(1)} KB` : "–");
+
+function setNote(id, text, kind = "") {
+  const el = $(id);
+  el.textContent = text;
+  el.className = kind ? `note ${kind}` : "note";
+}
+
+function countdown() {
+  const chip = $("chipNext");
+  if (!report) return;
+  if (report.running) {
+    chip.className = "chip live";
+    chip.innerHTML = "<b>running…</b>";
+    return;
+  }
+  if (!report.loop.enabled) {
+    chip.className = "chip";
+    chip.innerHTML = "auto-run <b>off</b>";
+    return;
+  }
+  if (!report.nextRunAt) {
+    chip.className = "chip";
+    chip.innerHTML = "next run <b>–</b>";
+    return;
+  }
+  const left = Math.max(0, Math.round((new Date(report.nextRunAt) - Date.now()) / 1000));
+  const m = Math.floor(left / 60);
+  const s = String(left % 60).padStart(2, "0");
+  chip.className = "chip live";
+  chip.innerHTML = `next run in <b>${m}m ${s}s</b>`;
+}
+
+function renderRows(wallets) {
+  const tbody = $("rows");
+  if (!wallets.length) {
+    tbody.innerHTML = `<tr><td colspan="10" class="muted">click Run now to check the wallets</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = wallets
+    .map((w) => {
+      const status =
+        w.status === "running"
+          ? `<span class="running">running…</span>`
+          : w.status === "error"
+            ? `<span class="bad">error</span> <span class="sub">${esc(w.error ?? "")}</span>`
+            : `<span class="ok">done</span>${w.note ? ` <span class="sub warn">${esc(w.note)}</span>` : ""}`;
+
+      const power = w.miningPower ?? null;
+      const powerShort = power !== null && power < w.powerRequired;
+      const energyCell =
+        w.energy === null
+          ? "–"
+          : `${num(w.energy)}<span class="sub">${w.energyCapacity ? ` / ${num(w.energyCapacity)}` : ""}</span>`;
+
+      return `
+        <tr class="${w.status === "error" ? "error" : ""}">
+          <td>
+            <div class="name">${esc(w.label)}</div>
+            <div class="sub">${esc(w.address)} · ${esc(w.proxy)}</div>
+          </td>
+          <td>
+            <div>${esc(w.mineName)}</div>
+            <div class="sub">${num(w.cost)} energy · needs ${num(w.powerRequired)} power · ${esc(w.mineSource === "sheet" ? "from sheet" : "default")}</div>
+          </td>
+          <td class="num">${energyCell}</td>
+          <td class="num ${powerShort ? "bad" : ""}">${num(power)}</td>
+          <td class="num">${num(w.open)}</td>
+          <td class="num ${w.ready ? "warn" : ""}">${num(w.ready)}</td>
+          <td class="num">${num(w.claimed)}</td>
+          <td class="num ok">${typeof w.claimedGems === "number" ? w.claimedGems.toFixed(2) : "–"}</td>
+          <td class="num">${num(w.started)}</td>
+          <td>${status}</td>
+        </tr>`;
+    })
+    .join("");
+}
+
+function renderLog(entries) {
+  $("log").innerHTML = entries
+    .map(
+      (entry) =>
+        `<div class="${esc(entry.kind)}"><time>${time(entry.at)}</time>${esc(entry.text)}</div>`,
+    )
+    .join("");
+}
+
+function render() {
+  if (!report) return;
+  $("chipWallets").textContent = report.walletCount ?? report.wallets.length;
+  $("chipClaimed").textContent = report.totals.claimed;
+  $("chipGems").textContent = report.totals.gems.toFixed(2);
+  $("chipStarted").textContent = report.totals.started;
+
+  const stateChip = $("chipState");
+  if (report.running) {
+    stateChip.className = "chip live";
+    stateChip.innerHTML = "<b>running</b>";
+  } else if (report.lastRunAt) {
+    stateChip.className = "chip off";
+    stateChip.innerHTML = `last run <b>${time(report.lastRunAt)}</b> · ${dur(report.lastDurationMs)} · ${esc(report.lastRunReason ?? "")}`;
+  } else {
+    stateChip.className = "chip";
+    stateChip.textContent = "idle — nothing ran yet";
+  }
+
+  // Loop controls
+  const loop = report.loop;
+  const loopBtn = $("loopBtn");
+  loopBtn.textContent = loop.enabled ? "Stop loop" : "Start loop";
+  loopBtn.classList.toggle("active", loop.enabled);
+  loopBtn.disabled = false;
+  if (document.activeElement !== $("interval")) $("interval").value = loop.intervalMinutes;
+  if (loop.enabled) {
+    setNote("loopInfo", `auto-run on · every ${loop.intervalMinutes} min (never overlaps)`, "ok");
+  } else {
+    setNote("loopInfo", "auto-run off — only Run now starts a cycle");
+  }
+
+  $("runNow").disabled = report.running;
+  renderRows(report.wallets);
+  renderLog(report.log ?? []);
+
+  const totalEnergy = report.wallets.reduce((sum, w) => sum + (w.energy ?? 0), 0);
+  const mines = new Set(report.wallets.map((w) => w.mineName));
+  $("footMines").textContent = [...mines].join(", ") || "–";
+  $("footEnergy").textContent = num(totalEnergy);
+  $("footOpen").textContent = num(report.wallets.reduce((sum, w) => sum + w.open, 0));
+  $("footReady").textContent = num(report.wallets.reduce((sum, w) => sum + w.ready, 0));
+  $("footClaimed").textContent = num(report.totals.claimed);
+  $("footGems").textContent = report.totals.gems.toFixed(2);
+  $("footStarted").textContent = num(report.totals.started);
+  $("footRun").textContent = report.lastRunAt
+    ? `${report.wallets.length} wallets · ${loop.enabled ? `loop every ${loop.intervalMinutes} min` : "manual"}`
+    : `${loop.enabled ? `loop every ${loop.intervalMinutes} min` : "manual"}`;
+  countdown();
+}
+
+async function load() {
+  try {
+    const response = await fetch("/api/report", { cache: "no-store" });
+    if (!response.ok) throw new Error(`report failed (${response.status})`);
+    report = await response.json();
+    render();
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function loadWalletsInfo() {
+  try {
+    const response = await fetch("/api/wallets", { cache: "no-store" });
+    if (!response.ok) throw new Error(`wallets failed (${response.status})`);
+    const info = await response.json();
+    if (!info.exists) {
+      setNote("walletsInfo", "no sheet uploaded — upload wallets.xlsx", "bad");
+      return;
+    }
+    if (info.count === null) {
+      setNote("walletsInfo", `${info.file} · ${kb(info.size)} · ${info.skipped[0] ?? "unreadable"}`, "bad");
+      return;
+    }
+    const skipped = info.skipped.length ? ` · ${info.skipped.length} skipped` : "";
+    setNote("walletsInfo", `${info.file} · ${kb(info.size)} · ${info.count} wallets${skipped}`, "ok");
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function postLoop(body) {
+  const response = await fetch("/api/loop", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `loop failed (${response.status})`);
+  return data.loop;
+}
+
+$("runNow").addEventListener("click", async () => {
+  $("runNow").disabled = true;
+  try {
+    const response = await fetch("/api/run", { method: "POST" });
+    if (response.status === 409) setNote("loopInfo", "a cycle is already running", "bad");
+    await load();
+  } catch (error) {
+    console.error(error);
+    $("runNow").disabled = false;
+  }
+});
+
+$("refresh").addEventListener("click", async () => {
+  await Promise.all([load(), loadWalletsInfo()]);
+});
+
+$("loopBtn").addEventListener("click", async () => {
+  if (!report) return;
+  $("loopBtn").disabled = true;
+  try {
+    await postLoop({ enabled: !report.loop.enabled });
+    await load();
+  } catch (error) {
+    setNote("loopInfo", error.message, "bad");
+  } finally {
+    $("loopBtn").disabled = false;
+  }
+});
+
+$("interval").addEventListener("change", async () => {
+  const minutes = Number($("interval").value);
+  try {
+    await postLoop({ intervalMinutes: minutes });
+    await load();
+    setNote("loopInfo", `loop interval saved: every ${minutes} min`, "ok");
+  } catch (error) {
+    setNote("loopInfo", error.message, "bad");
+    await load();
+  }
+});
+
+$("uploadBtn").addEventListener("click", () => $("walletsFile").click());
+
+$("walletsFile").addEventListener("change", async () => {
+  const file = $("walletsFile").files?.[0];
+  if (!file) return;
+  setNote("walletsInfo", `uploading ${file.name}…`);
+  try {
+    const response = await fetch("/api/wallets", {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: file,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `upload failed (${response.status})`);
+    const skipped = data.skipped.length ? `, ${data.skipped.length} row(s) skipped` : "";
+    setNote("walletsInfo", `${data.file} · ${data.count} wallets${skipped}`, "ok");
+    await load();
+  } catch (error) {
+    setNote("walletsInfo", error.message, "bad");
+  } finally {
+    $("walletsFile").value = "";
+  }
+});
+
+setInterval(() => {
+  countdown();
+  if (report?.running) load();
+}, 1000);
+setInterval(load, 5000);
+Promise.all([load(), loadWalletsInfo()]);
+</script>
+</body>
+</html>

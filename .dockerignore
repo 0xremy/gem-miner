@@ -1,0 +1,11 @@
+node_modules
+data
+*.xlsx
+*.xlsx.bak
+wallets.json
+wallets.example.json
+.env
+.env.*
+.git
+.gitignore
+*.log

@@ -1,0 +1,19 @@
+{
+  "name": "gem-api-client",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-wallet client for gemapi.bullshot.io: positions, mining, claims",
+  "scripts": {
+    "positions": "node src/index.js positions",
+    "claim": "node src/index.js claim",
+    "mine": "node src/index.js start",
+    "run": "node src/index.js run",
+    "ui": "node src/server.js",
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "undici": "^7.30.1"
+  }
+}

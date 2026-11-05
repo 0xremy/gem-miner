@@ -1,0 +1,6 @@
+node_modules/
+.env
+data/
+wallets.json
+wallets.xlsx
+wallets.xlsx.bak

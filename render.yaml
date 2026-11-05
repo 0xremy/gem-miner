@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: gem-miner
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: oregon
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: DASHBOARD_USER
+        value: admin
+      - key: DASHBOARD_PASSWORD
+        sync: false
+    disk:
+      name: gem-miner-data
+      mountPath: /app/data
+      sizeGB: 1
