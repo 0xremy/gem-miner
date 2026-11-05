@@ -6,6 +6,9 @@ import { request } from "../http.js";
  */
 export const AUTO_QUESTS = [
   { id: "daily_miner_signin", label: "daily check-in" },
+  // Start + claim is enough: the claim accepts an empty tweetUrl, so the
+  // X-engagement quest does not need a real tweet.
+  { id: "tw_daily_engage", label: "social daily" },
 ];
 
 /**
