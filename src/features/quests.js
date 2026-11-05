@@ -9,6 +9,7 @@ export const AUTO_QUESTS = [
   // Start + claim is enough: the claim accepts an empty tweetUrl, so the
   // X-engagement quest does not need a real tweet.
   { id: "tw_daily_engage", label: "social daily" },
+  { id: "weekly_miner_checkin", label: "weekly check-in" },
 ];
 
 /**
