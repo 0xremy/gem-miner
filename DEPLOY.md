@@ -39,15 +39,36 @@ platform that terminates TLS for you).
    The `Dockerfile` is detected automatically. `npm start` also works if the platform
    prefers a Node buildpack.
 2. Add a **persistent disk / volume** mounted at `/app/data`. Without it the uploaded
-   sheet is lost on every redeploy. On Render, `render.yaml` already declares the
-   service, the disk and the health check — use **New → Blueprint** and pick this repo,
-   then set `DASHBOARD_PASSWORD` when prompted.
+   sheet is lost on every redeploy (the Render free plan has no disk — see the free
+   plan notes below). On Render, `render.yaml` declares the service and the health
+   check — use **New → Blueprint** and pick this repo, then set
+   `DASHBOARD_PASSWORD` when prompted.
 3. Environment variables:
    - `DASHBOARD_PASSWORD` — required in practice
    - `DASHBOARD_USER` — defaults to `admin`
    - `HOST` / `PORT` — the Dockerfile already sets `0.0.0.0` and `8080`; platforms
      that inject their own `PORT` win.
 4. Health check path: `/healthz`.
+
+### Render free plan (what you get, what breaks)
+
+The free instance is fine for one always-on service if you keep it warm, but it has
+no disk:
+
+- **Spin-down:** after 15 minutes with no inbound traffic Render stops the process.
+  A free UptimeRobot monitor on `https://YOUR-APP.onrender.com/healthz` every 5
+  minutes keeps it running (HTTP(s) monitor, keyword `"ok":true` optional).
+- **Ephemeral filesystem:** `data/wallets.xlsx` and `data/settings.json` are lost on
+  every deploy, restart, or spin-down. After any of those: log in, **upload
+  wallets.xlsx** again, and press **Start loop** (the loop is always off after a
+  restart by design).
+- Render may restart a free service at any time, and 750 free instance hours per
+  month is just under a full month (~744 h) — an always-on service consumes all of it.
+- No shell/SSH and no persistent disk on free. `render.yaml` here is configured for
+  free; the paid variant (Starter + 1 GB disk at `/app/data`) is commented inside it.
+- If losing the sheet on restart becomes annoying, two fixes: move to Starter + disk,
+  or keep the sheet in Supabase Storage and download it at cycle start.
+
 
 ## First run after deploy
 

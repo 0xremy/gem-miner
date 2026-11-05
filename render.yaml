@@ -1,9 +1,13 @@
+# Free plan: no persistent disk. The uploaded sheet lives in the container's
+# ephemeral filesystem, so it must be re-uploaded after a restart or deploy.
+# To keep the sheet across restarts, switch to `plan: starter` and uncomment
+# the disk block below (~$7/mo + $0.25/GB).
 services:
   - type: web
     name: gem-miner
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     region: oregon
     healthCheckPath: /healthz
     autoDeploy: true
@@ -14,7 +18,7 @@ services:
         value: admin
       - key: DASHBOARD_PASSWORD
         sync: false
-    disk:
-      name: gem-miner-data
-      mountPath: /app/data
-      sizeGB: 1
+    # disk:
+    #   name: gem-miner-data
+    #   mountPath: /app/data
+    #   sizeGB: 1
