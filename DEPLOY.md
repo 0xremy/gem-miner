@@ -52,6 +52,10 @@ platform that terminates TLS for you).
    - `DASHBOARD_USER` — defaults to `admin`
    - `WALLETS_SHEET_URL` — the Google Sheet link (see below); without it you upload
      `wallets.xlsx` from the UI instead
+   - `AUTO_START_LOOP=true` — start the loop on boot, so a deploy or crash resumes
+     cycling with no browser open (leave it unset to keep the dashboard idle)
+   - `LOOP_INTERVAL_MINUTES` — the interval at boot (1–1440). Without it the interval
+     comes from `data/settings.json`, which a host without a disk loses on restart
    - `HOST` / `PORT` — the Dockerfile already sets `0.0.0.0` and `8080`; platforms
      that inject their own `PORT` win.
 4. Health check path: `/healthz`.
@@ -67,14 +71,23 @@ no disk:
 - **Ephemeral filesystem:** `data/wallets.xlsx` and `data/settings.json` are lost on
   every deploy, restart, or spin-down. Setting `WALLETS_SHEET_URL` avoids the upload
   entirely (the sheet is re-downloaded on every run); without it, log in, **upload
-  wallets.xlsx** again, and press **Start loop** (the loop is always off after a
-  restart by design).
+  wallets.xlsx** again, and press **Start loop** (the loop is off after a restart
+  unless `AUTO_START_LOOP=true`).
 - Render may restart a free service at any time, and 750 free instance hours per
   month is just under a full month (~744 h) — an always-on service consumes all of it.
 - No shell/SSH and no persistent disk on free. `render.yaml` here is configured for
   free; the paid variant (Starter + 1 GB disk at `/app/data`) is commented inside it.
 - If losing the sheet on restart becomes annoying, two fixes: move to Starter + disk,
   or keep the sheet in Supabase Storage and download it at cycle start.
+
+**Running with no browser open.** Two things are needed, and they are separate: the
+monitor keeps the instance awake, and `AUTO_START_LOOP=true` makes the process start
+cycling by itself. With both set — UptimeRobot on `/healthz` every 5 minutes plus
+`AUTO_START_LOOP=true` and `LOOP_INTERVAL_MINUTES` — the loop survives a closed tab, a
+deploy and a crash. Limits that remain: a spin-down can land mid-cycle (the rows
+already published are kept, the remaining wallets wait for the next cycle), 750 free
+instance hours is about one month of being always on, and the watchdog is pointing at
+`/healthz`, which is unauthenticated on purpose.
 
 
 ## First run after deploy

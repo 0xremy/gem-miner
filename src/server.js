@@ -9,6 +9,7 @@ import {
   loopState,
   runQuestFeature,
   requestStop,
+  startConfiguredLoop,
 } from "./runner.js";
 import { AUTO_QUESTS } from "./features/quests.js";
 import { inspectXlsxBuffer, loadWallets, walletsFilePath } from "./wallets.js";
@@ -298,7 +299,11 @@ function listen(port, attempt = 0) {
     server.off("error", onError);
     console.log(`Gem miner dashboard → http://${HOST}:${port}`);
     if (AUTH_PASSWORD) console.log(`login required (user "${AUTH_USER}")`);
-    console.log("auto-run is OFF — nothing happens until you click Run 1 loop, a side quest or Start loop");
+    if (startConfiguredLoop().enabled) {
+      console.log("auto-run is ON (AUTO_START_LOOP) — the loop restarts itself after a deploy or crash");
+    } else {
+      console.log("auto-run is OFF — nothing happens until you click Run 1 loop, a side quest or Start loop");
+    }
     const source = sheetSource();
     console.log(
       source.kind === "google-sheet"

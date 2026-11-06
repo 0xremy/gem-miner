@@ -37,6 +37,12 @@ const reasonOf = (error) => {
 };
 
 function readIntervalMinutes() {
+  // A hosted deployment has no persistent disk, so data/settings.json resets on
+  // every restart; LOOP_INTERVAL_MINUTES pins the interval there instead.
+  const fromEnv = Number(process.env.LOOP_INTERVAL_MINUTES);
+  if (Number.isFinite(fromEnv) && fromEnv >= MIN_INTERVAL_MINUTES && fromEnv <= MAX_INTERVAL_MINUTES) {
+    return Math.round(fromEnv);
+  }
   try {
     const saved = JSON.parse(readFileSync(settingsPath, "utf8"));
     const minutes = Number(saved.intervalMinutes);
@@ -65,7 +71,7 @@ export const state = {
   lastRunReason: null,
   lastDurationMs: null,
   nextRunAt: null,
-  /** Auto-run is off until someone turns it on: nothing runs on boot. */
+  /** Auto-run is off until someone turns it on (or AUTO_START_LOOP is set). */
   loop: { enabled: false, intervalMinutes: readIntervalMinutes() },
   wallets: [],
   totals: { claimed: 0, gems: 0, started: 0, quests: 0, questGems: 0 },
@@ -620,6 +626,18 @@ export function setLoop({ enabled, intervalMinutes } = {}) {
   }
 
   return loopState();
+}
+
+/**
+ * Hosted deployments can start the loop themselves: AUTO_START_LOOP=true makes
+ * the server begin cycling on boot, so a restart resumes mining with no browser
+ * open. Unset — the normal case — the dashboard still boots idle.
+ */
+export function startConfiguredLoop() {
+  const wanted = String(process.env.AUTO_START_LOOP || "").trim().toLowerCase();
+  if (wanted !== "true" && wanted !== "1") return loopState();
+  log(`AUTO_START_LOOP is set — the loop resumes after every restart`, "ok");
+  return setLoop({ enabled: true });
 }
 
 export function loopState() {
