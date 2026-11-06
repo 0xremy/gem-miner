@@ -1,0 +1,38 @@
+[Unit]
+Description=Gem Miner dashboard (gemapi.bullshot.io multi-wallet)
+Documentation=file:/opt/gem-miner/deploy/oracle/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gems
+Group=gems
+WorkingDirectory=/opt/gem-miner
+# DASHBOARD_PASSWORD, WALLETS_SHEET_URL, PORT… live here (chmod 600).
+EnvironmentFile=/etc/gem-miner.env
+
+# Only localhost: Caddy terminates HTTPS and proxies to 127.0.0.1:4173.
+Environment=HOST=127.0.0.1
+Environment=PORT=4173
+Environment=NODE_ENV=production
+
+ExecStart=/usr/bin/node src/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+# The loop is always off after a start, so a restart never mines on its own.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+# The only writable place: the sheet cache (data/wallets.xlsx) and settings.json.
+ReadWritePaths=/opt/gem-miner/data
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gem-miner
+
+[Install]
+WantedBy=multi-user.target

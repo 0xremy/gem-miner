@@ -63,6 +63,8 @@
   button:disabled { opacity: 0.5; cursor: default; }
   button.primary { background: #14406b; border-color: #1f5b96; }
   button.active { background: #1d3a2a; border-color: #2f6b46; }
+  button.stop { background: #3a1620; border-color: #6b2f3e; color: #f0b7c0; }
+  button.stop:hover:not(:disabled) { border-color: var(--danger); }
   .toolbar {
     display: flex;
     align-items: center;
@@ -89,10 +91,23 @@
     font-variant-numeric: tabular-nums;
   }
   .toolbar input[type="number"]:focus { outline: 1px solid var(--accent); }
-  .toolbar .note { font-size: 12px; color: var(--muted); }
-  .toolbar .note.ok { color: var(--ok); }
-  .toolbar .note.bad { color: var(--danger); }
+  .note { font-size: 12px; color: var(--muted); }
+  .note.ok { color: var(--ok); }
+  .note.bad { color: var(--danger); }
   .toolbar .divider { width: 1px; height: 22px; background: var(--line); }
+  .quest-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+  .section-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    padding: 4px 9px;
+    border: 1px solid #1f4d73;
+    border-radius: 6px;
+    background: #0d1a26;
+    white-space: nowrap;
+  }
+  header .note { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   main { padding: 18px 20px 8px; }
   .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
   table { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 980px; }
@@ -158,20 +173,29 @@
     <span class="chip" id="chipNext">auto-run off</span>
   </div>
   <span class="spacer"></span>
-  <button id="runNow" class="primary">Run now</button>
+  <span class="note" id="walletsInfo">no sheet loaded</span>
+  <button id="uploadBtn">Upload .xlsx</button>
+  <input id="walletsFile" type="file" accept=".xlsx" hidden />
   <button id="refresh">Refresh</button>
 </header>
 
 <div class="toolbar">
-  <button id="uploadBtn">Upload wallets.xlsx</button>
-  <input id="walletsFile" type="file" accept=".xlsx" hidden />
-  <span class="note" id="walletsInfo">no sheet loaded</span>
+  <span class="section-label">Mining</span>
+  <button id="runNow" class="primary" title="one full cycle now: claim finished mines, start new ones, then every side quest">Run 1 loop</button>
+  <button id="stopMining" class="stop" disabled title="abort the mining run in progress: the wallet in progress finishes, then nothing else runs and the loop is turned off">Stop</button>
   <span class="divider"></span>
   <label for="interval">Loop every</label>
   <input id="interval" type="number" min="1" max="1440" step="1" value="10" />
   <span class="note">min</span>
   <button id="loopBtn">Start loop</button>
   <span class="note" id="loopInfo">auto-run off</span>
+</div>
+
+<div class="toolbar">
+  <span class="section-label">Side quests</span>
+  <span class="quest-buttons" id="questButtons"></span>
+  <button id="stopQuests" class="stop" disabled title="abort the side-quest run in progress: the wallet in progress finishes, then nothing else runs">Stop</button>
+  <span class="note" id="questInfo">one quest at a time, every wallet — social daily only where the sheet has an x</span>
 </div>
 
 <main>
@@ -193,7 +217,7 @@
         </tr>
       </thead>
       <tbody id="rows">
-        <tr><td colspan="11" class="muted">click Run now to check the wallets</td></tr>
+        <tr><td colspan="11" class="muted">click Run 1 loop to check the wallets</td></tr>
       </tbody>
       <tfoot>
         <tr>
@@ -222,6 +246,10 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let report = null;
+/** Set while a quest-button run is in flight, so its result can be summarised. */
+let pendingQuest = null;
+/** True when the last run was cut short with a Stop button. */
+let stoppedEarly = false;
 
 const esc = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -240,8 +268,12 @@ function countdown() {
   const chip = $("chipNext");
   if (!report) return;
   if (report.running) {
+    const done = report.progress?.done ?? 0;
+    const total = report.progress?.total;
     chip.className = "chip live";
-    chip.innerHTML = "<b>running…</b>";
+    chip.innerHTML = report.stopRequested
+      ? `<b>stopping…</b> after ${done}${total ? `/${total}` : ""} wallet(s)`
+      : `<b>running…</b> ${done}${total ? `/${total}` : ""} wallet(s)`;
     return;
   }
   if (!report.loop.enabled) {
@@ -264,7 +296,9 @@ function countdown() {
 function renderRows(wallets) {
   const tbody = $("rows");
   if (!wallets.length) {
-    tbody.innerHTML = `<tr><td colspan="11" class="muted">click Run now to check the wallets</td></tr>`;
+    tbody.innerHTML = report?.running
+      ? `<tr><td colspan="11" class="muted">importing the sheet, then showing each wallet as it finishes…</td></tr>`
+      : `<tr><td colspan="11" class="muted">click Run 1 loop to check the wallets</td></tr>`;
     return;
   }
 
@@ -314,6 +348,51 @@ function renderRows(wallets) {
     .join("");
 }
 
+function questSummary(questId) {
+  let claimed = 0;
+  let gems = 0;
+  let already = 0;
+  let skipped = 0;
+  let errors = 0;
+  for (const wallet of report.wallets ?? []) {
+    for (const quest of wallet.quests ?? []) {
+      if (quest.id !== questId) continue;
+      if (quest.status === "error") errors += 1;
+      else if (quest.status === "skipped") skipped += 1;
+      else if (quest.gems > 0) {
+        claimed += 1;
+        gems += quest.gems;
+      } else already += 1;
+    }
+  }
+  return { claimed, gems, already, skipped, errors };
+}
+
+/** Three quest buttons (daily / social / weekly), one click runs them everywhere. */
+function renderQuestButtons(list) {
+  const box = $("questButtons");
+  const signature = (list ?? []).map((quest) => quest.id).join(",");
+  if (box.dataset.signature !== signature) {
+    box.dataset.signature = signature;
+    box.innerHTML = (list ?? [])
+      .map((quest) => `<button data-quest="${esc(quest.id)}">${esc(quest.label)}</button>`)
+      .join("");
+  }
+  for (const button of box.querySelectorAll("button")) button.disabled = Boolean(report.running);
+
+  if (pendingQuest && !report.running) {
+    const { claimed, gems, already, skipped, errors } = questSummary(pendingQuest.id);
+    const parts = [`${claimed} claimed (+${gems} gems)`];
+    if (already) parts.push(`${already} already claimed`);
+    if (skipped) parts.push(`${skipped} skipped (no x in the sheet)`);
+    if (errors) parts.push(`${errors} failed`);
+    if (stoppedEarly) parts.push("stopped early");
+    setNote("questInfo", `${pendingQuest.label}: ${parts.join(" · ")}`, errors ? "bad" : "ok");
+    pendingQuest = null;
+    stoppedEarly = false;
+  }
+}
+
 function renderLog(entries) {
   $("log").innerHTML = entries
     .map(
@@ -336,7 +415,7 @@ function render() {
   const stateChip = $("chipState");
   if (report.running) {
     stateChip.className = "chip live";
-    stateChip.innerHTML = "<b>running</b>";
+    stateChip.innerHTML = report.stopRequested ? "<b>stopping</b>…" : "<b>running</b>";
   } else if (report.lastRunAt) {
     stateChip.className = "chip off";
     stateChip.innerHTML = `last run <b>${time(report.lastRunAt)}</b> · ${dur(report.lastDurationMs)} · ${esc(report.lastRunReason ?? "")}`;
@@ -355,10 +434,16 @@ function render() {
   if (loop.enabled) {
     setNote("loopInfo", `auto-run on · every ${loop.intervalMinutes} min (never overlaps)`, "ok");
   } else {
-    setNote("loopInfo", "auto-run off — only Run now starts a cycle");
+    setNote("loopInfo", "auto-run off — only Run 1 loop starts a cycle");
   }
 
+  // One run slot: each section's Stop is live only while that section is running.
   $("runNow").disabled = report.running;
+  const stopping = Boolean(report.stopRequested);
+  const kind = report.runKind ?? null;
+  $("stopMining").disabled = !(report.running && kind !== "quests") || stopping;
+  $("stopQuests").disabled = !(report.running && kind === "quests") || stopping;
+  renderQuestButtons(report.questButtons);
   renderRows(report.wallets);
   renderLog(report.log ?? []);
 
@@ -376,6 +461,18 @@ function render() {
     ? `${report.wallets.length} wallets · ${loop.enabled ? `loop every ${loop.intervalMinutes} min` : "manual"}`
     : `${loop.enabled ? `loop every ${loop.intervalMinutes} min` : "manual"}`;
   countdown();
+}
+
+/** Clears the table the moment a run is clicked — it refills one wallet at a time. */
+function optimisticStart(kind) {
+  if (!report) return;
+  report.running = true;
+  report.runKind = kind;
+  report.stopRequested = false;
+  report.progress = { done: 0, total: null };
+  report.wallets = [];
+  report.totals = { claimed: 0, gems: 0, started: 0, quests: 0, questGems: 0 };
+  render();
 }
 
 async function load() {
@@ -403,7 +500,13 @@ async function loadWalletsInfo() {
       return;
     }
     const skipped = info.skipped.length ? ` · ${info.skipped.length} skipped` : "";
-    setNote("walletsInfo", `${info.file} · ${kb(info.size)} · ${info.count} wallets${skipped}`, "ok");
+    const where =
+      info.source?.kind === "google-sheet"
+        ? `Google Sheet — imported on every run`
+        : info.file;
+    const note = `${where} · ${info.count} wallets${skipped}`;
+    setNote("walletsInfo", note, "ok");
+    $("walletsInfo").title = info.source?.url || info.file;
   } catch (error) {
     console.error(error);
   }
@@ -420,17 +523,64 @@ async function postLoop(body) {
   return data.loop;
 }
 
+$("questButtons").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-quest]");
+  if (!button) return;
+  const questId = button.dataset.quest;
+  pendingQuest = { id: questId, label: button.textContent };
+  stoppedEarly = false;
+  setNote("questInfo", `running ${button.textContent}…`);
+  optimisticStart("quests");
+  try {
+    const response = await fetch("/api/quests/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ questId }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `quest run failed (${response.status})`);
+    await load();
+  } catch (error) {
+    pendingQuest = null;
+    setNote("questInfo", error.message, "bad");
+  }
+});
+
 $("runNow").addEventListener("click", async () => {
   $("runNow").disabled = true;
+  optimisticStart("mining");
   try {
     const response = await fetch("/api/run", { method: "POST" });
-    if (response.status === 409) setNote("loopInfo", "a cycle is already running", "bad");
+    if (response.status === 409) {
+      const data = await response.json().catch(() => ({}));
+      setNote("loopInfo", data.error || "a run is already in progress", "bad");
+    }
     await load();
   } catch (error) {
     console.error(error);
     $("runNow").disabled = false;
   }
 });
+
+/** Stop, shared by both sections: only one run exists, so the flag ends it. */
+async function stopRun(noteId) {
+  if (report?.runKind === "quests") stoppedEarly = true;
+  setNote(noteId, "stopping — the wallet in progress finishes first…", "warn");
+  try {
+    const response = await fetch("/api/stop", { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `stop failed (${response.status})`);
+    if (report) report.stopRequested = true;
+    render();
+  } catch (error) {
+    stoppedEarly = false;
+    setNote(noteId, error.message, "bad");
+  }
+  await load();
+}
+
+$("stopMining").addEventListener("click", () => stopRun("loopInfo"));
+$("stopQuests").addEventListener("click", () => stopRun("questInfo"));
 
 $("refresh").addEventListener("click", async () => {
   await Promise.all([load(), loadWalletsInfo()]);

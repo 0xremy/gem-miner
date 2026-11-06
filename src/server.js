@@ -2,8 +2,17 @@ import { createServer } from "node:http";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { snapshot, triggerNow, setLoop, loopState } from "./runner.js";
+import {
+  snapshot,
+  triggerNow,
+  setLoop,
+  loopState,
+  runQuestFeature,
+  requestStop,
+} from "./runner.js";
+import { AUTO_QUESTS } from "./features/quests.js";
 import { inspectXlsxBuffer, loadWallets, walletsFilePath } from "./wallets.js";
+import { sheetSource } from "./sheet-source.js";
 
 const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -33,6 +42,16 @@ function authorized(req) {
   if (scheme !== "Basic" || !encoded) return false;
   const [user, ...rest] = Buffer.from(encoded, "base64").toString("utf8").split(":");
   return user === AUTH_USER && rest.join(":") === AUTH_PASSWORD;
+}
+
+/**
+ * Mining and side quests share one run slot: a second start is refused and the
+ * 409 says which run is holding it, so the dashboard can point at the right Stop.
+ */
+function busyMessage(kind) {
+  return kind === "quests"
+    ? "a side-quest run is already in progress — press Stop in Side quests first"
+    : "a mining run is already in progress — press Stop in Mining first";
 }
 
 function readBody(req, limit = MAX_UPLOAD_BYTES) {
@@ -76,7 +95,15 @@ async function walletFileInfo() {
     }
   }
 
-  return { file: relative(projectRoot, file).replaceAll("\\", "/"), exists: size !== null, size, modifiedAt, count, skipped };
+  return {
+    file: relative(projectRoot, file).replaceAll("\\", "/"),
+    source: sheetSource(),
+    exists: size !== null,
+    size,
+    modifiedAt,
+    count,
+    skipped,
+  };
 }
 
 const server = createServer(async (req, res) => {
@@ -114,11 +141,58 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/run") {
+      const current = snapshot();
       const started = triggerNow("manual");
       sendJson(res, started ? 202 : 409, {
         started,
-        error: started ? undefined : "a cycle is already running",
+        error: started ? undefined : busyMessage(current.runKind),
+        runningKind: current.runKind,
       });
+      return;
+    }
+
+    // Stop: shared by the mining and the side-quests section — only one run ever
+    // exists, so a single flag ends whichever one is in flight.
+    if (req.method === "POST" && url.pathname === "/api/stop") {
+      const result = requestStop();
+      sendJson(res, result.stopped ? 202 : 409, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/quests/run") {
+      const body = await readBody(req, 8 * 1024);
+      let payload = {};
+      if (body.length) {
+        try {
+          payload = JSON.parse(body.toString("utf8"));
+        } catch {
+          sendJson(res, 400, { error: "body must be JSON" });
+          return;
+        }
+      }
+
+      try {
+        const questId = String(payload.questId ?? "");
+        const feature = AUTO_QUESTS.find((quest) => quest.id === questId);
+        if (!feature) {
+          sendJson(res, 400, { error: `unknown quest "${questId}"` });
+          return;
+        }
+        const current = snapshot();
+        if (current.running) {
+          sendJson(res, 409, {
+            error: busyMessage(current.runKind),
+            started: false,
+            runningKind: current.runKind,
+          });
+          return;
+        }
+        // Fire and forget: the dashboard polls /api/report for the result.
+        runQuestFeature(questId, { reason: `quest: ${feature.label}` });
+        sendJson(res, 202, { started: true, questId, label: feature.label });
+      } catch (error) {
+        sendJson(res, error.status || 400, { error: error.message });
+      }
       return;
     }
 
@@ -224,7 +298,13 @@ function listen(port, attempt = 0) {
     server.off("error", onError);
     console.log(`Gem miner dashboard → http://${HOST}:${port}`);
     if (AUTH_PASSWORD) console.log(`login required (user "${AUTH_USER}")`);
-    console.log("auto-run is OFF — nothing happens until you click Run now or Start loop");
+    console.log("auto-run is OFF — nothing happens until you click Run 1 loop, a side quest or Start loop");
+    const source = sheetSource();
+    console.log(
+      source.kind === "google-sheet"
+        ? `wallets source: Google Sheet ${source.url ? "(re-imported on every run)" : `(invalid: ${source.error})`}`
+        : "wallets source: local .xlsx (re-read on every run)",
+    );
     console.log(`wallets file: ${relative(projectRoot, walletsFilePath()).replaceAll("\\", "/")}`);
   });
 }

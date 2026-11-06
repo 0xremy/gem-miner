@@ -3,13 +3,16 @@ import { request } from "../http.js";
 /**
  * Quests the dashboard runs on its own, in this order.
  * Adding one is a single line — see GET /api/quests for the ids.
+ *
+ * `enabled(wallet)` is optional: return false and that wallet is skipped for the
+ * quest. Social daily is gated by the "Social Daily" column of the sheet.
  */
 export const AUTO_QUESTS = [
-  { id: "daily_miner_signin", label: "daily check-in" },
+  { id: "daily_miner_signin", label: "Daily check-in" },
+  { id: "weekly_miner_checkin", label: "Weekly check-in" },
   // Start + claim is enough: the claim accepts an empty tweetUrl, so the
   // X-engagement quest does not need a real tweet.
-  { id: "tw_daily_engage", label: "social daily" },
-  { id: "weekly_miner_checkin", label: "weekly check-in" },
+  { id: "tw_daily_engage", label: "Social daily", enabled: (wallet) => wallet.socialDaily !== false },
 ];
 
 /**

@@ -35,6 +35,7 @@ const COLUMNS = {
   proxy: "proxy",
   location: "location",
   mine: "location",
+  socialdaily: "socialDaily",
 };
 
 const normalize = (value) => String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -76,6 +77,8 @@ async function entriesFromWorkbook(workbook) {
       token: pick("token"),
       proxy: pick("proxy"),
       location: pick("location"),
+      socialDaily: pick("socialDaily"),
+      socialDailyColumn: Boolean(at.socialDaily),
     });
   }
   return entries;
@@ -115,6 +118,8 @@ function readJson() {
     token: wallet.token ?? "",
     proxy: wallet.proxy ?? "",
     location: wallet.locationId ?? wallet.location ?? "",
+    socialDaily: wallet.socialDaily === false ? "" : "x",
+    socialDailyColumn: wallet.socialDaily !== undefined,
   }));
 }
 
@@ -156,6 +161,10 @@ function buildWallet(entry, position) {
       token: entry.token,
       proxy,
       locationId,
+      // "x" in the Social Daily column = run the social daily quest for this
+      // wallet. Blank skips it. A sheet without that column at all keeps the
+      // old behaviour (every wallet runs it).
+      socialDaily: entry.socialDailyColumn ? /^x+$/i.test(entry.socialDaily) : true,
       expiresAt,
       expired: expiresAt !== null && expiresAt <= Date.now(),
     },

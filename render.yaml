@@ -18,6 +18,11 @@ services:
         value: admin
       - key: DASHBOARD_PASSWORD
         sync: false
+      # Optional: Google Sheet link (.../spreadsheets/d/<id>/edit?usp=sharing),
+      # shared with "anyone with the link". Every run re-downloads it, which also
+      # works around the missing disk on the free plan.
+      - key: WALLETS_SHEET_URL
+        sync: false
     # disk:
     #   name: gem-miner-data
     #   mountPath: /app/data

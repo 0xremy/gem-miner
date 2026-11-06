@@ -5,7 +5,7 @@ image: you upload `wallets.xlsx` from the UI after deploying, and it is stored i
 `data/` on a persistent volume.
 
 Auto-run is **off** after every start. Nothing is claimed or started until you press
-**Run now** (or **Start loop**).
+**Run 1 loop** (or **Start loop**).
 
 ## What the host must provide
 
@@ -17,6 +17,10 @@ Auto-run is **off** after every start. Nothing is claimed or started until you p
 | `DASHBOARD_PASSWORD` env var | without it, anyone with the URL can spend your energy |
 
 `GET /healthz` answers `200 {"ok":true}` for platform health checks.
+
+**Oracle Cloud Always Free VM (systemd + Caddy, HTTPS, no Docker needed):** see
+[`deploy/oracle/README.md`](deploy/oracle/README.md) — one VM handles the UI fine,
+and a free `sslip.io` hostname gets a real certificate even without a domain.
 
 ## Docker (any VPS)
 
@@ -46,6 +50,8 @@ platform that terminates TLS for you).
 3. Environment variables:
    - `DASHBOARD_PASSWORD` — required in practice
    - `DASHBOARD_USER` — defaults to `admin`
+   - `WALLETS_SHEET_URL` — the Google Sheet link (see below); without it you upload
+     `wallets.xlsx` from the UI instead
    - `HOST` / `PORT` — the Dockerfile already sets `0.0.0.0` and `8080`; platforms
      that inject their own `PORT` win.
 4. Health check path: `/healthz`.
@@ -59,7 +65,8 @@ no disk:
   A free UptimeRobot monitor on `https://YOUR-APP.onrender.com/healthz` every 5
   minutes keeps it running (HTTP(s) monitor, keyword `"ok":true` optional).
 - **Ephemeral filesystem:** `data/wallets.xlsx` and `data/settings.json` are lost on
-  every deploy, restart, or spin-down. After any of those: log in, **upload
+  every deploy, restart, or spin-down. Setting `WALLETS_SHEET_URL` avoids the upload
+  entirely (the sheet is re-downloaded on every run); without it, log in, **upload
   wallets.xlsx** again, and press **Start loop** (the loop is always off after a
   restart by design).
 - Render may restart a free service at any time, and 750 free instance hours per
@@ -76,10 +83,15 @@ no disk:
 2. **Upload wallets.xlsx** — the sheet is validated before saving (missing
    `Wallet Address`/`Token` columns or zero valid rows are rejected, the old file is
    kept).
-3. Everything is idle. Press **Run now** for a single cycle, or set *Loop every N
+3. Everything is idle. Press **Run 1 loop** for a single cycle, or set *Loop every N
    minutes* and press **Start loop**.
 4. The loop never overlaps itself: if a cycle takes longer than the interval, the next
    one starts only after the last wallet has been checked.
+5. **Stop** sits next to each section. Mining and side quests share one run slot —
+   only one can run at a time (a second start is refused with a 409 naming the run
+   that holds it). Stop finishes the wallet in progress, ends the run, and turns the
+   auto loop off so it cannot restart by itself; the rows already done stay on screen
+   and the log says `stopped after N/M wallet(s)`.
 
 ## Files and secrets
 
@@ -90,11 +102,31 @@ no disk:
 - Keep the dashboard behind HTTPS; bearer tokens travel in request bodies only when the
   server talks to the API, but the sheet upload contains them.
 
+## Wallets from a Google Sheet
+
+Set `WALLETS_SHEET_URL` to the normal Google Sheets link
+(`https://docs.google.com/spreadsheets/d/<id>/edit?usp=sharing`) or just the sheet id,
+and share the sheet with **anyone with the link (viewer)**. Then:
+
+- every run (**Run 1 loop** and each side-quest button) downloads a fresh `.xlsx`
+  before reading the wallets, so edits made in Google apply to the next click — no
+  restart, no upload;
+- the download is cached as `data/wallets.xlsx`, so if Google is unreachable the run
+  continues with the last copy and logs a warning;
+- the **Social Daily** column decides who runs the social daily quest: an `x` means
+  yes, blank means that wallet is skipped for it. A sheet without that column runs it
+  for every wallet.
+
+Columns: `Name`, `Wallet Address`, `Token`, `Proxy`, `Location`, `Social Daily`.
+Uploads from the UI still work; a configured `WALLETS_SHEET_URL` wins over them.
+
 ## Local use
 
 ```bash
 npm install
-npm run ui        # http://127.0.0.1:4173 (falls back to the next port if busy)
+WALLETS_SHEET_URL='https://docs.google.com/spreadsheets/d/<id>/edit?usp=sharing' npm run ui
+# http://127.0.0.1:4173 (falls back to the next port if busy)
 ```
 
-Local runs read `./wallets.xlsx` if it exists, otherwise `data/wallets.xlsx`.
+Without `WALLETS_SHEET_URL`, local runs read `data/wallets.xlsx` if it exists,
+otherwise `./wallets.xlsx`.

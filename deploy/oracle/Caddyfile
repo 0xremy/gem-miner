@@ -1,0 +1,26 @@
+# Caddy gets (and renews) a free Let's Encrypt certificate for the name below.
+#
+# Use either:
+#   gems.example.com          a domain you own, A record → the VM's reserved public IP
+#   123.45.67.89.sslip.io     no domain needed: sslip.io resolves the IP for you
+#
+# Ports 80 + 443 must be open in the VCN security list *and* in the OS firewall
+# (see README.md) or the certificate challenge fails.
+gems.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:4173 {
+		# A full 106-wallet cycle can run for a while, but requests are short;
+		# this only keeps a stalled upstream from holding a connection forever.
+		transport http {
+			response_header_timeout 60s
+		}
+	}
+	# The dashboard already has Basic auth (DASHBOARD_PASSWORD). To add a second
+	# layer here instead: basicauth { admin <bcrypt-hash> }
+	log {
+		output file /var/log/caddy/gem-miner.log {
+			roll_size 10mb
+			roll_keep 3
+		}
+	}
+}

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadWallets, describeProxy } from "./wallets.js";
+import { syncSheetFromUrl } from "./sheet-source.js";
 import { checkPositions, claimReady, startMine } from "./app.js";
 import { userBalance } from "./features/balance.js";
 import {
@@ -68,8 +69,89 @@ export const state = {
   loop: { enabled: false, intervalMinutes: readIntervalMinutes() },
   wallets: [],
   totals: { claimed: 0, gems: 0, started: 0, quests: 0, questGems: 0 },
+  /** How many wallets this run has finished / will check, for the progress chip. */
+  progress: { done: 0, total: null },
+  /** "mining" | "quests" while a run is in flight — only one may run at a time. */
+  runKind: null,
+  runLabel: null,
+  /** Set by the Stop buttons: the run stops after the wallet in progress. */
+  stopRequested: false,
   log: [],
 };
+
+const emptyTotals = () => ({ claimed: 0, gems: 0, started: 0, quests: 0, questGems: 0 });
+
+/** One finished wallet → one more table row; the dashboard polls for it. */
+function publish(row) {
+  state.wallets.push(row);
+  state.progress.done += 1;
+  state.totals.claimed += row.claimed;
+  state.totals.gems += row.claimedGems;
+  state.totals.started += row.started;
+  state.totals.quests += row.questsClaimed;
+  state.totals.questGems += row.questGems;
+}
+
+/** Empty the table before the first wallet, so it fills up one row at a time. */
+function beginRun(reason, kind = "mining", label = null) {
+  clearTimer();
+  state.nextRunAt = null;
+  state.running = true;
+  state.runKind = kind;
+  state.runLabel = label;
+  state.stopRequested = false;
+  state.lastRunReason = reason;
+  state.wallets = [];
+  state.totals = emptyTotals();
+  state.progress = { done: 0, total: null };
+}
+
+/** "a mining run is already in progress" — the same wording the API and the UI use. */
+function busyMessage() {
+  return state.runKind === "quests"
+    ? `${state.runLabel ?? "a side-quest"} run is already in progress — press Stop first`
+    : "a mining run is already in progress — press Stop first";
+}
+
+/**
+ * Stop buttons (mining and side quests): the wallet in progress is finished, so
+ * nothing is left half-claimed, then the run ends and the auto loop stays off.
+ */
+export function requestStop() {
+  if (!state.running) return { stopped: false, error: "nothing is running" };
+  if (state.stopRequested) return { stopped: true, alreadyStopping: true };
+
+  state.stopRequested = true;
+  if (state.loop.enabled) {
+    state.loop.enabled = false;
+    clearTimer();
+    state.nextRunAt = null;
+  }
+  log(`stop requested — finishing the wallet in progress, then stopping`, "bad");
+  return { stopped: true };
+}
+
+/**
+ * Re-imports the wallet sheet at the start of every run: the Google Sheet is
+ * downloaded over the cached data/wallets.xlsx when one is configured, then the
+ * file on disk is parsed from scratch (no memory cache).
+ */
+async function refreshWallets() {
+  try {
+    const sheet = await syncSheetFromUrl();
+    if (sheet.used) {
+      log(`sheet re-imported from Google Sheets (${(sheet.bytes / 1024).toFixed(1)} KB)`);
+    }
+  } catch (error) {
+    log(`could not refresh the sheet: ${error.message} — using the last copy`, "bad");
+  }
+
+  const wallets = await loadWallets({ quiet: true, fresh: true });
+  state.walletCount = wallets.length;
+  state.progress.total = wallets.length;
+  log(`${wallets.length} wallet(s) loaded`);
+  return wallets;
+}
 
 function log(text, kind = "") {
   state.log.unshift({ at: new Date().toISOString(), kind, text });
@@ -114,7 +196,7 @@ function newRow(wallet) {
  * on unless a quest was actually started, so an ordinary cycle pays one cheap
  * request per wallet.
  */
-async function runQuests(wallet, row) {
+async function runQuests(wallet, row, questList = AUTO_QUESTS) {
   let quests;
   try {
     quests = await listQuests(wallet, { verbose: false });
@@ -125,7 +207,13 @@ async function runQuests(wallet, row) {
 
   const pending = [];
 
-  for (const { id, label } of AUTO_QUESTS) {
+  for (const { id, label, enabled } of questList) {
+    if (enabled && !enabled(wallet)) {
+      row.quests.push({ id, label, status: "skipped", note: "not in the sheet", gems: 0 });
+      log(`[${row.label}] quest ${label}: skipped (turned off in the sheet)`);
+      continue;
+    }
+
     const quest = findQuest(quests, id);
     if (!quest) {
       log(`[${row.label}] quest ${label}: not offered on this account`);
@@ -333,51 +421,45 @@ async function runOne(wallet) {
  */
 export async function runCycle({ reason = "manual" } = {}) {
   if (state.running) {
-    log(`cycle skipped (${reason}): previous cycle still running`);
+    log(`cycle skipped (${reason}): ${busyMessage()}`);
+    // A loop slot that lands on another run is retried instead of dropped, so
+    // the loop survives a side-quest run overlapping its timer.
+    if (state.loop.enabled) scheduleNext(30_000);
     return state;
   }
 
-  clearTimer();
-  state.nextRunAt = null;
-  state.running = true;
-  state.lastRunReason = reason;
+  beginRun(reason, "mining");
   const startedAt = Date.now();
   log(`cycle started (${reason})`, "ok");
 
   try {
     let wallets = [];
     try {
-      wallets = await loadWallets({ quiet: true, fresh: true });
+      wallets = await refreshWallets();
     } catch (error) {
       log(`could not read wallets: ${error.message}`, "bad");
       return state;
     }
 
-    if (wallets.length !== state.walletCount && state.walletCount !== 0) {
-      log(`wallet list changed: ${state.walletCount} → ${wallets.length}`, "");
-    }
-    state.walletCount = wallets.length;
-
-    const rows = [];
+    // One wallet at a time, each row published as soon as it is done.
     for (const wallet of wallets) {
-      rows.push(await runOne(wallet));
+      if (state.stopRequested) break;
+      publish(await runOne(wallet));
       await sleep(WALLET_GAP_MS);
     }
 
-    state.wallets = rows;
-    state.totals = rows.reduce(
-      (totals, row) => ({
-        claimed: totals.claimed + row.claimed,
-        gems: totals.gems + row.claimedGems,
-        started: totals.started + row.started,
-        quests: totals.quests + row.questsClaimed,
-        questGems: totals.questGems + row.questGems,
-      }),
-      { claimed: 0, gems: 0, started: 0, quests: 0, questGems: 0 },
-    );
-
     state.lastRunAt = new Date().toISOString();
     state.lastDurationMs = Date.now() - startedAt;
+    if (state.stopRequested) {
+      state.lastRunReason = `${reason} · stopped`;
+      log(
+        `cycle stopped after ${state.wallets.length}/${wallets.length} wallet(s): ` +
+          `${state.totals.claimed} claimed, +${state.totals.gems.toFixed(2)} gems`,
+        "bad",
+      );
+      return state;
+    }
+
     log(
       `cycle finished in ${(state.lastDurationMs / 1000).toFixed(1)}s: ` +
         `${state.totals.claimed} claimed, ${state.totals.gems.toFixed(2)} gems, ${state.totals.started} started, ` +
@@ -387,11 +469,93 @@ export async function runCycle({ reason = "manual" } = {}) {
     return state;
   } finally {
     state.running = false;
+    state.runKind = null;
+    state.runLabel = null;
+    state.stopRequested = false;
     // Only after the last wallet: a cycle that ran longer than the interval
     // queues the next one with no extra wait, never overlapping this one.
     if (state.loop.enabled) {
       const elapsed = Date.now() - startedAt;
       scheduleNext(state.loop.intervalMinutes * 60_000 - elapsed);
+    }
+  }
+}
+
+/**
+ * One quest feature (daily check-in, social daily, weekly check-in) for every
+ * wallet — what the three dashboard buttons trigger. No mining, and it shares
+ * `state.running` with runCycle so a clicked quest never overlaps a cycle.
+ */
+export async function runQuestFeature(questId, { reason = "quest" } = {}) {
+  const feature = AUTO_QUESTS.find((quest) => quest.id === questId);
+  if (!feature) {
+    throw Object.assign(new Error(`unknown quest "${questId}"`), { status: 400 });
+  }
+  if (state.running) return { started: false, error: busyMessage() };
+
+  beginRun(reason, "quests", feature.label);
+  const startedAt = Date.now();
+  log(`quest run started (${feature.label})`, "ok");
+
+  try {
+    let wallets = [];
+    try {
+      wallets = await refreshWallets();
+    } catch (error) {
+      log(`could not read wallets: ${error.message}`, "bad");
+      return { started: true };
+    }
+
+    // Same clearing rule as a cycle: the table refills one wallet at a time.
+    for (const wallet of wallets) {
+      if (state.stopRequested) break;
+      const row = newRow(wallet);
+      const walletStartedAt = Date.now();
+
+      try {
+        if (wallet.expired) throw new Error("token expired — update the Token cell");
+        await runQuests(wallet, row, [feature]);
+        row.status = row.error ? "error" : "ok";
+      } catch (error) {
+        row.status = "error";
+        row.error = error.message;
+        log(`[${row.label}] ${feature.label} failed: ${error.message}`, "bad");
+      }
+
+      row.durationMs = Date.now() - walletStartedAt;
+      publish(row);
+      await sleep(WALLET_GAP_MS);
+    }
+
+    state.lastRunAt = new Date().toISOString();
+    state.lastDurationMs = Date.now() - startedAt;
+
+    const claimed = state.totals.quests;
+    const gems = state.totals.questGems;
+    if (state.stopRequested) {
+      state.lastRunReason = `${reason} · stopped`;
+      log(
+        `${feature.label} stopped after ${state.wallets.length}/${wallets.length} wallet(s): ` +
+          `${claimed} claimed, +${gems} gems`,
+        "bad",
+      );
+      return { started: true, stopped: true, claimed, gems };
+    }
+
+    log(
+      `quest run finished in ${(state.lastDurationMs / 1000).toFixed(1)}s: ` +
+        `${feature.label} claimed on ${claimed}/${state.wallets.length} wallet(s), +${gems} gems`,
+      "ok",
+    );
+    return { started: true, claimed, gems };
+  } finally {
+    state.running = false;
+    state.runKind = null;
+    state.runLabel = null;
+    state.stopRequested = false;
+    // Same rule as a cycle: the loop counts from the end of this run.
+    if (state.loop.enabled) {
+      scheduleNext(state.loop.intervalMinutes * 60_000 - (Date.now() - startedAt));
     }
   }
 }
@@ -426,7 +590,7 @@ function scheduleNext(delayMs) {
 /**
  * Turns the automatic loop on/off and/or changes the interval.
  * The interval is written to data/settings.json so a restart keeps it, but the
- * loop itself always comes back off: nothing runs until "Run now"/"Start loop".
+ * loop itself always comes back off: nothing runs until "Run 1 loop"/"Start loop".
  */
 export function setLoop({ enabled, intervalMinutes } = {}) {
   if (intervalMinutes !== undefined) {
@@ -464,7 +628,7 @@ export function loopState() {
   };
 }
 
-/** Manual "Run now"; returns false when a cycle is already in flight. */
+/** Manual "Run 1 loop"; returns false when any run is already in flight. */
 export function triggerNow(reason = "manual") {
   if (state.running) return false;
   runCycle({ reason });
@@ -480,7 +644,12 @@ export function snapshot() {
     lastRunReason: state.lastRunReason,
     lastDurationMs: state.lastDurationMs,
     nextRunAt: state.nextRunAt,
+    progress: state.progress,
+    runKind: state.runKind,
+    runLabel: state.runLabel,
+    stopRequested: state.stopRequested,
     loop: { enabled: state.loop.enabled, intervalMinutes: state.loop.intervalMinutes },
+    questButtons: AUTO_QUESTS.map(({ id, label }) => ({ id, label })),
     wallets: state.wallets,
     totals: state.totals,
     log: state.log.slice(0, 120),
