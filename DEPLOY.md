@@ -80,11 +80,14 @@ no disk:
 ## First run after deploy
 
 1. Open the URL and log in with `DASHBOARD_USER` / `DASHBOARD_PASSWORD`.
-2. **Upload wallets.xlsx** — the sheet is validated before saving (missing
+2. **Upload wallets.xlsx** — only when no Google Sheet is configured. With
+   `WALLETS_SHEET_URL` the upload controls are hidden, because the server downloads
+   the sheet itself. An upload is validated before saving (missing
    `Wallet Address`/`Token` columns or zero valid rows are rejected, the old file is
    kept).
 3. Everything is idle. Press **Run 1 loop** for a single cycle, or set *Loop every N
-   minutes* and press **Start loop**.
+   minutes* and press **Start loop** — the first cycle starts immediately and the table
+   fills one wallet at a time; the next one is booked from its end.
 4. The loop never overlaps itself: if a cycle takes longer than the interval, the next
    one starts only after the last wallet has been checked.
 5. **Stop** sits next to each section. Mining and side quests share one run slot —

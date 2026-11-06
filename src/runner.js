@@ -610,7 +610,9 @@ export function setLoop({ enabled, intervalMinutes } = {}) {
       log("auto-run stopped", "");
     } else {
       log(`auto-run on: every ${state.loop.intervalMinutes} min`, "ok");
-      if (!state.running) scheduleNext(state.loop.intervalMinutes * 60_000);
+      // Start the first cycle immediately, so pressing Start loop shows wallets
+      // filling the table one by one; the next slot is booked from its end.
+      if (!state.running) runCycle({ reason: "loop" });
     }
   } else if (state.loop.enabled && !state.running) {
     // Interval edited while the loop was idle → restart the countdown from now.

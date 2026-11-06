@@ -173,8 +173,10 @@
     <span class="chip" id="chipNext">auto-run off</span>
   </div>
   <span class="spacer"></span>
-  <span class="note" id="walletsInfo">no sheet loaded</span>
-  <button id="uploadBtn">Upload .xlsx</button>
+  <span class="note" id="walletsInfo">checking the wallet sheet…</span>
+  <!-- Hidden until we know the sheet is a local file: with WALLETS_SHEET_URL the
+       server downloads it itself, so there is nothing to upload. -->
+  <button id="uploadBtn" hidden>Upload .xlsx</button>
   <input id="walletsFile" type="file" accept=".xlsx" hidden />
   <button id="refresh">Refresh</button>
 </header>
@@ -491,8 +493,16 @@ async function loadWalletsInfo() {
     const response = await fetch("/api/wallets", { cache: "no-store" });
     if (!response.ok) throw new Error(`wallets failed (${response.status})`);
     const info = await response.json();
+    // A Google Sheet URL means the server re-downloads the sheet itself, so the
+    // upload controls only make sense for a local .xlsx file.
+    const fromSheet = info.source?.kind === "google-sheet";
+    $("uploadBtn").hidden = fromSheet;
     if (!info.exists) {
-      setNote("walletsInfo", "no sheet uploaded — upload wallets.xlsx", "bad");
+      if (fromSheet) {
+        setNote("walletsInfo", "Google Sheet — imported at the start of every run", "ok");
+      } else {
+        setNote("walletsInfo", "no sheet uploaded — upload wallets.xlsx", "bad");
+      }
       return;
     }
     if (info.count === null) {
@@ -588,12 +598,17 @@ $("refresh").addEventListener("click", async () => {
 
 $("loopBtn").addEventListener("click", async () => {
   if (!report) return;
+  const enabling = !report.loop.enabled;
   $("loopBtn").disabled = true;
+  // Turning the loop on starts a cycle straight away — clear the table now so
+  // it refills one wallet at a time instead of showing the previous run.
+  if (enabling && !report.running) optimisticStart("mining");
   try {
-    await postLoop({ enabled: !report.loop.enabled });
+    await postLoop({ enabled: enabling });
     await load();
   } catch (error) {
     setNote("loopInfo", error.message, "bad");
+    await load();
   } finally {
     $("loopBtn").disabled = false;
   }
