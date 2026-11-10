@@ -41,7 +41,8 @@ The dashboard (npm run ui) runs the full cycle itself: balance, claim, then
 floor(energy / mine cost) sessions, every 10 minutes.
 
 Flags:
-  --location=<id>      force a mining location (greenstone-quarry | crystal-cavern | ember-mine)
+  --location=<id>      force a mining location (greenstone-quarry | crystal-cavern | ember-mine |
+                       frozen-depths | void-rift)
   --count=<n>          force sessions per wallet (default 1; the dashboard computes it)
   --wallet=<label>     only this wallet
   --json               print raw JSON instead of the summary

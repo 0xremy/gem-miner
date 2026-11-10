@@ -6,6 +6,8 @@ export const MINES = [
   { id: "greenstone-quarry", name: "Greenstone Quarry", seconds: 600, cost: 10, power: 0 },
   { id: "crystal-cavern", name: "Crystal Cavern", seconds: 1800, cost: 20, power: 25 },
   { id: "ember-mine", name: "Ember Mine", seconds: 5400, cost: 35, power: 60 },
+  { id: "frozen-depths", name: "Frozen Depths", seconds: 14400, cost: 50, power: 120 },
+  { id: "void-rift", name: "Void Rift", seconds: 28800, cost: 75, power: 250 },
 ];
 
 /** Used when the sheet row leaves Location blank. */
