@@ -1,6 +1,14 @@
 import { ProxyAgent, fetch as proxyFetch } from "undici";
 import { config } from "./config.js";
 
+/**
+ * The game API sits behind Cloudflare, which rejects the bare "undici"/"node"
+ * user agents with a 403 HTML page. Send the browser string the frontend sends;
+ * GEM_USER_AGENT overrides it if the check ever tightens again.
+ */
+const DEFAULT_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
 /** One reusable ProxyAgent per proxy URL, so wallets do not build a tunnel per request. */
 const proxyAgents = new Map();
 function dispatcherFor(proxy) {
@@ -48,6 +56,7 @@ export async function request({
     authorization: token ? `Bearer ${token}` : undefined,
     "x-wallet-address": walletAddress || undefined,
     Referer: "https://gem.bullshot.io/",
+    "user-agent": process.env.GEM_USER_AGENT || DEFAULT_USER_AGENT,
     ...headers,
   };
   for (const key of Object.keys(finalHeaders)) {
