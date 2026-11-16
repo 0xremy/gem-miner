@@ -3,8 +3,10 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadWallets, describeProxy } from "./wallets.js";
 import { syncSheetFromUrl } from "./sheet-source.js";
-import { checkPositions, claimReady, startMine } from "./app.js";
+import { checkPositions, claimReady } from "./app.js";
 import { userBalance } from "./features/balance.js";
+import { deepCatalog } from "./features/mining-locations.js";
+import { digVeins } from "./veins.js";
 import {
   AUTO_QUESTS,
   claimQuest,
@@ -13,15 +15,12 @@ import {
   secondsUntilReset,
   startQuest,
 } from "./features/quests.js";
-import { DEFAULT_LOCATION, costOf, powerOf, describeMine } from "./mines.js";
+import { DEFAULT_LOCATION, VEINS_PER_MINE, costOf, powerOf, describeMine } from "./mines.js";
 
 /** Default gap between cycles; the dashboard can change it at runtime. */
 export const DEFAULT_INTERVAL_MINUTES = 10;
 export const MIN_INTERVAL_MINUTES = 1;
 export const MAX_INTERVAL_MINUTES = 1440;
-
-/** Safety cap so one huge energy balance cannot fire hundreds of requests. */
-export const MAX_SESSIONS = 20;
 
 /** Gap between wallets, so six wallets do not burst the API at once. */
 const WALLET_GAP_MS = 400;
@@ -182,6 +181,9 @@ function newRow(wallet) {
     gemsBalance: null,
     open: 0,
     ready: 0,
+    /** Veins of the appointed mine that are digging after this pass. */
+    veins: 0,
+    veinTotal: VEINS_PER_MINE,
     claimed: 0,
     claimedGems: 0,
     started: 0,
@@ -322,7 +324,8 @@ async function runQuests(wallet, row, questList = AUTO_QUESTS) {
  * One wallet, in the order asked for:
  *   1. balance  → energy left
  *   2. positions → claim whatever is claimable
- *   3. floor(energy / mine cost) sessions, gated by mining power
+ *   3. every vein of the appointed mine (six of them), then lower ranks while
+ *      energy lasts — see veins.js
  */
 async function runOne(wallet) {
   const row = newRow(wallet);
@@ -330,6 +333,8 @@ async function runOne(wallet) {
 
   try {
     if (wallet.expired) throw new Error("token expired — update the Token cell");
+    // An unknown Location is a sheet typo, not a reason to mine the default.
+    if (wallet.locationError) throw new Error(wallet.locationError);
 
     // 1. Balance
     const balance = (await userBalance(wallet, { verbose: false })).body ?? {};
@@ -368,38 +373,44 @@ async function runOne(wallet) {
       }
     }
 
-    // 3. How many sessions this energy pays for
+    // 3. All six veins of the appointed mine, then lower ranks while energy lasts
     const energy = typeof row.energy === "number" ? row.energy : 0;
-    const affordable = Math.floor(energy / row.cost);
-    // Sessions come purely from energy; MAX_SESSIONS is only a burst guard.
-    let sessions = Math.max(0, Math.min(affordable, MAX_SESSIONS));
+    const catalog = await deepCatalog(wallet).catch((error) => {
+      log(`[${row.label}] could not read the mine catalog: ${error.message}`, "bad");
+      return null;
+    });
+    row.cost = catalog?.get(row.mine)?.cost ?? row.cost;
+    row.powerRequired = catalog?.get(row.mine)?.powerRequired ?? row.powerRequired;
 
-    if (row.miningPower !== null && row.miningPower < row.powerRequired) {
-      sessions = 0;
-      row.note = `needs ${row.powerRequired} mining power, has ${row.miningPower}`;
+    const dig = await digVeins(wallet, {
+      mine: row.mine,
+      gear: wallet.gear,
+      energy,
+      power: row.miningPower ?? 0,
+      positions,
+      catalog,
+    });
+    row.started = dig.started;
+    row.veins = dig.veins;
+    row.veinTotal = dig.total;
+    row.energy = dig.energy;
+
+    for (const note of dig.notes) log(`[${row.label}] ${note}`, "bad");
+    for (const extra of dig.spill) {
+      log(`[${row.label}] ${describeMine(extra.mine)}: +${extra.started} lower-rank vein(s)`, "ok");
     }
-
     log(
-      `[${row.label}] ${energy} energy ÷ ${row.cost} (${row.mineName}) = ${affordable} session(s)` +
-        (sessions !== affordable ? ` → starting ${sessions}` : ""),
+      `[${row.label}] ${row.mineName}: ${dig.veins}/${dig.total} vein(s) digging, ` +
+        `${dig.started} armed — energy ${energy} → ${dig.energy}`,
+      dig.complete ? "ok" : "",
     );
 
-    if (sessions > 0) {
-      const started = await startMine(wallet, { locationId: row.mine, count: sessions });
-      for (const attempt of started) {
-        if (attempt.error) {
-          row.error = attempt.error;
-          log(`[${row.label}] start failed: ${attempt.error}`, "bad");
-          continue;
-        }
-        if (attempt.skipped) {
-          log(`[${row.label}] start stopped: ${attempt.reason}`);
-          continue;
-        }
-        row.started += 1;
-        if (typeof attempt.energy === "number") row.energy = attempt.energy;
-        log(`[${row.label}] started ${row.mineName} (energy left ${attempt.energy ?? "?"})`, "ok");
-      }
+    if (dig.outOfEnergy) row.note = "out of energy";
+    else if (!dig.complete) {
+      row.note =
+        dig.veins === 0 && dig.notes.length
+          ? dig.notes[0]
+          : `${row.mineName}: ${dig.veins}/${dig.total} veins digging — waiting for the next loop`;
     }
 
     // 4. Quests (daily check-in, ...) — last, so a quest hiccup never blocks mining.

@@ -133,8 +133,18 @@ and share the sheet with **anyone with the link (viewer)**. Then:
   yes, blank means that wallet is skipped for it. A sheet without that column runs it
   for every wallet.
 
-Columns: `Name`, `Wallet Address`, `Token`, `Proxy`, `Location`, `Social Daily`.
-Uploads from the UI still work; a configured `WALLETS_SHEET_URL` wins over them.
+Columns: `Name`, `Wallet Address`, `Token`, `Proxy`, `Location`, `Social Daily`,
+`Gear` (optional). Uploads from the UI still work; a configured
+`WALLETS_SHEET_URL` wins over them.
+
+`Location` is the mine the wallet should work — one of `greenstone-quarry`,
+`crystal-cavern`, `ember-mine`, `frozen-depths`, `void-rift`, `molten-core`
+(blank = greenstone-quarry, and a typo is an error rather than a silent
+fallback). Each run claims finished veins, then arms every vein of that mine with
+the `deep` strategy — six per mine — and only once all six are digging does it
+fill lower-rank mines with the leftover energy. `Gear` is passed to the game when
+the cell is filled, and costs/durations come from `GET /api/mining/locations`, not
+from the table in `src/mines.js`.
 
 Only the **first worksheet** of the spreadsheet is read — there is no tab setting,
 so the wallet tab must be leftmost. Headers are matched leniently (`Wallet Address`

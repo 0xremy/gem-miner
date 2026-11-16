@@ -35,6 +35,9 @@ const COLUMNS = {
   proxy: "proxy",
   location: "location",
   mine: "location",
+  mininglocation: "location",
+  gear: "gear",
+  loadout: "gear",
   socialdaily: "socialDaily",
 };
 
@@ -77,6 +80,7 @@ async function entriesFromWorkbook(workbook) {
       token: pick("token"),
       proxy: pick("proxy"),
       location: pick("location"),
+      gear: pick("gear"),
       socialDaily: pick("socialDaily"),
       socialDailyColumn: Boolean(at.socialDaily),
     });
@@ -118,6 +122,7 @@ function readJson() {
     token: wallet.token ?? "",
     proxy: wallet.proxy ?? "",
     location: wallet.locationId ?? wallet.location ?? "",
+    gear: wallet.gear ?? "",
     socialDaily: wallet.socialDaily === false ? "" : "x",
     socialDailyColumn: wallet.socialDaily !== undefined,
   }));
@@ -142,14 +147,14 @@ function buildWallet(entry, position) {
   const warn = [];
 
   // Optional: which mine this wallet works. Blank falls back to the default
-  // (greenstone-quarry); the number of sessions always comes from the balance.
+  // (greenstone-quarry); the veins always come from the mine itself.
   let locationId = null;
+  let locationError = null;
   if (entry.location) {
     locationId = resolveLocation(entry.location);
     if (!locationId) {
-      warn.push(
-        `${label} (row ${entry.row}): unknown mine "${entry.location}" — use ${MINES.map((m) => m.id).join(", ")}; falling back to the default`,
-      );
+      locationError = `unknown mine "${entry.location}" in the Location cell — use ${MINES.map((m) => m.id).join(", ")}`;
+      warn.push(`${label} (row ${entry.row}): ${locationError}; this wallet will not mine`);
     }
   }
 
@@ -161,6 +166,8 @@ function buildWallet(entry, position) {
       token: entry.token,
       proxy,
       locationId,
+      locationError,
+      gear: entry.gear || null,
       // "x" in the Social Daily column = run the social daily quest for this
       // wallet. Blank skips it. A sheet without that column at all keeps the
       // old behaviour (every wallet runs it).

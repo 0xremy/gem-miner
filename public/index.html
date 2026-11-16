@@ -213,7 +213,7 @@
           <th>Ready</th>
           <th>Claimed</th>
           <th>Gems</th>
-          <th>Started</th>
+          <th>Veins</th>
           <th>Quests</th>
           <th>Status</th>
         </tr>
@@ -333,8 +333,8 @@ function renderRows(wallets) {
             <div class="sub">${esc(w.address)} · ${esc(w.proxy)}</div>
           </td>
           <td>
-            <div>${esc(w.mineName)}</div>
-            <div class="sub">${num(w.cost)} energy · needs ${num(w.powerRequired)} power · ${esc(w.mineSource === "sheet" ? "from sheet" : "default")}</div>
+            <div>${esc(w.mineName)} <span class="sub">${num(w.veins)}/${num(w.veinTotal)}</span></div>
+            <div class="sub">${num(w.cost)} energy/vein · needs ${num(w.powerRequired)} power · ${esc(w.mineSource === "sheet" ? "from sheet" : "default")}</div>
           </td>
           <td class="num">${energyCell}</td>
           <td class="num ${powerShort ? "bad" : ""}">${num(power)}</td>

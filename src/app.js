@@ -2,7 +2,8 @@ import { describeExpiry, describeProxy } from "./wallets.js";
 import { miningPositions } from "./features/mining-positions.js";
 import { listMiningPositions } from "./features/mining-positions-list.js";
 import { claimPosition, isClaimable } from "./features/mining-claim.js";
-import { costOf, DEFAULT_LOCATION } from "./mines.js";
+import { listMiningSpots } from "./features/mining-locations.js";
+import { costOf, DEFAULT_LOCATION, STRATEGY, VEINS_PER_MINE } from "./mines.js";
 
 const short = (address) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 const reasonOf = (error) => {
@@ -41,28 +42,46 @@ export async function claimReady(wallet, positions) {
 
 /**
  * Explicit argument > the wallet's sheet row > the built-in default, so a
- * `Location`/`Count` cell in wallets.xlsx drives that wallet on its own.
+ * `Location`/`Count` cell in wallets.xlsx drives that wallet on its own. A
+ * position is one vein, so this arms at most the six the mine offers.
  */
 export async function startMine(wallet, { locationId, count } = {}) {
   const location = locationId || wallet.locationId || DEFAULT_LOCATION;
-  const sessions = Math.max(1, Math.min(20, Number(count) || 1));
+  const sessions = Math.max(1, Math.min(VEINS_PER_MINE, Number(count) || 1));
   const cost = costOf(location);
   const started = [];
 
-  for (let i = 0; i < sessions; i += 1) {
+  let idle;
+  try {
+    const { body } = await listMiningSpots(wallet, location);
+    idle = (body?.spots ?? []).filter((spot) => !spot.occupied).slice(0, sessions);
+  } catch (error) {
+    started.push({ locationId: location, error: reasonOf(error) });
+    return started;
+  }
+
+  if (idle.length === 0) {
+    started.push({ locationId: location, skipped: true, reason: "all six veins are already digging" });
+    return started;
+  }
+
+  for (const spot of idle) {
     try {
-      const { body } = await miningPositions(wallet, { locationId: location, verbose: false });
+      const { body } = await miningPositions(wallet, {
+        locationId: location,
+        spotId: spot.id,
+        strategy: STRATEGY,
+        gear: wallet.gear,
+        verbose: false,
+      });
       const energy = body.user?.energy;
       started.push({
         locationId: location,
+        spotId: spot.id,
         id: body.position?.id,
         endsAt: body.position?.endsAt,
         energy,
       });
-      if (typeof energy === "number" && energy < cost && i + 1 < sessions) {
-        started.push({ skipped: true, reason: `energy ${energy} below cost ${cost}` });
-        break;
-      }
       if (typeof energy === "number" && energy < cost) break;
     } catch (error) {
       started.push({ locationId: location, error: reasonOf(error) });
