@@ -1,0 +1,15 @@
+{
+  "name": "power-upgrade",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Buys Mining Power I for every wallet in the Google Sheet until it reaches the target mining power",
+  "scripts": {
+    "start": "node src/index.js",
+    "plan": "node src/index.js --dry-run"
+  },
+  "dependencies": {
+    "googleapis": "^171.4.0",
+    "undici": "^7.30.1"
+  }
+}

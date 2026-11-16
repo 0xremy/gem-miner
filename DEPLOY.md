@@ -136,6 +136,30 @@ and share the sheet with **anyone with the link (viewer)**. Then:
 Columns: `Name`, `Wallet Address`, `Token`, `Proxy`, `Location`, `Social Daily`.
 Uploads from the UI still work; a configured `WALLETS_SHEET_URL` wins over them.
 
+Only the **first worksheet** of the spreadsheet is read — there is no tab setting,
+so the wallet tab must be leftmost. Headers are matched leniently (`Wallet Address`
+= `walletaddress`); `Location` is a mine id/alias and `x` in `Social Daily` opts a
+wallet in. Extra columns are ignored.
+
+## Handing the project to someone else
+
+They need the code, not your data. Do **not** copy `.env`, `data/`, `wallets.xlsx`,
+`wallets.xlsx.bak`, `wallets.json` (all hold tokens or your password) or
+`node_modules` — everything except the code is gitignored.
+
+Their setup is three values:
+
+```ini
+DASHBOARD_PASSWORD=a-long-random-password
+WALLETS_SHEET_URL=https://docs.google.com/spreadsheets/d/<their-id>/edit?usp=sharing
+AUTO_START_LOOP=true            # optional: survive restarts with no browser open
+```
+
+No Google Cloud project or service account is needed for this app: it shares the
+sheet as "anyone with the link", then downloads the `.xlsx` export. If they would
+rather not share the sheet publicly, they can skip `WALLETS_SHEET_URL` entirely and
+upload `wallets.xlsx` from the dashboard instead.
+
 ## Local use
 
 ```bash

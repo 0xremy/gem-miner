@@ -1,0 +1,17 @@
+{
+  "name": "gem-token-refresher",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Re-logs wallets into Bull GEM using their seed phrases and writes fresh JWTs back to the Google Sheet",
+  "scripts": {
+    "refresh": "node src/index.js",
+    "refresh:dry": "node src/index.js --dry-run"
+  },
+  "dependencies": {
+    "ethers": "^6.17.0",
+    "exceljs": "^4.4.0",
+    "googleapis": "^189.0.0",
+    "undici": "^7.30.2"
+  }
+}
