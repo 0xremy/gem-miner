@@ -6,9 +6,12 @@
   "description": "Buys Mining Power I for every wallet in the Google Sheet until it reaches the target mining power",
   "scripts": {
     "start": "node src/index.js",
-    "plan": "node src/index.js --dry-run"
+    "plan": "node src/index.js --dry-run",
+    "buy": "node src/buy.js",
+    "audit": "node src/audit.js"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "googleapis": "^171.4.0",
     "undici": "^7.30.1"
   }

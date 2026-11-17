@@ -4,3 +4,4 @@ data/
 wallets.json
 wallets.xlsx
 wallets.xlsx.bak
+*-audit.xlsx

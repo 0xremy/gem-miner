@@ -37,6 +37,9 @@ export const config = {
   /** Energy Capacity I: +20 capacity for 180 gems, repeated until the gems run out. */
   energyUpgradeId: process.env.ENERGY_UPGRADE_ID || "upg-energy-1",
   energyIncrement: Number(process.env.ENERGY_INCREMENT || 20),
+  /** Shop item bought by src/buy.js: Mine Cart Mk I, 4500 gems. */
+  shopItemId: process.env.SHOP_ITEM_ID || "mine-cart-1",
+  shopItemPrice: Number(process.env.SHOP_ITEM_PRICE || 4500),
   concurrency: Math.max(1, Number(process.env.CONCURRENCY || 3)),
   retries: Math.max(0, Number(process.env.AUTH_RETRIES || 3)),
 };

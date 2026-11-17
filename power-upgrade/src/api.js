@@ -82,41 +82,9 @@ export function createClient({ token, address, proxy }) {
     buyPower: () => request({ method: "POST", path: `/api/upgrades/${config.upgradeId}` }),
     /** Buys one Energy Capacity upgrade; `{ success, message, upgrade, user }`. */
     buyEnergy: () => request({ method: "POST", path: `/api/upgrades/${config.energyUpgradeId}` }),
-    /** The shop catalog: id, name, price, effect, … Public, no auth needed. */
-    catalog: () => request({ method: "GET", path: "/api/shop/items" }),
-    /** Buys one of a shop item; `{ success, item, user, inventory }`. */
-    purchase: (itemId) =>
-      request({ method: "POST", path: "/api/shop/purchase", body: { itemId } }),
-    /** { daily: [], weekly: [], oneTime: [], resets: { … } } — what is claimable. */
-    quests: () => request({ method: "GET", path: "/api/quests" }),
-    /** Arms a quest for its `delaySeconds`; the reward is collected with claim. */
-    startQuest: (questId) =>
-      request({ method: "POST", path: "/api/quests/start", body: { questId } }),
-    /** Collects a started quest; `{ success, message, reward: { gems, xp }, user }`. */
-    claimQuest: (questId, tweetUrl = "") =>
-      request({ method: "POST", path: "/api/quests/claim", body: { questId, tweetUrl } }),
-
-    /** The six mines with their quick/standard/deep costs and durations. */
-    locations: () => request({ method: "GET", path: "/api/mining/locations" }),
-    /** One mine's vein grid: `{ seed, refreshesAt, spots: [{ id, index, vein, occupied, … }] }`. */
-    spots: (locationId) =>
-      request({
-        method: "GET",
-        path: `/api/mining/locations/${encodeURIComponent(locationId)}/spots`,
-      }),
-    /** Every unclaimed position of the wallet (finished and still digging). */
-    positions: () => request({ method: "GET", path: "/api/mining/positions" }),
-    /** Arms one vein; the position pays out when its duration has elapsed. */
-    startPosition: ({ locationId, spotId, strategy = "deep", gear } = {}) => {
-      const body = { locationId, spotId, strategy };
-      if (gear) body.gear = gear;
-      return request({ method: "POST", path: "/api/mining/positions", body });
-    },
-    /** Collects a finished vein; `{ status, gemsEarned, rewards, user }`. */
-    claimPosition: (positionId) =>
-      request({
-        method: "POST",
-        path: `/api/mining/positions/${encodeURIComponent(positionId)}/claim`,
-      }),
+    /** Buys a shop item by id; `{ success, item, user, inventory }`. */
+    purchase: (itemId) => request({ method: "POST", path: "/api/shop/purchase", body: { itemId } }),
+    /** Ownership check before buying; a bare array of `{ assetId, quantity, … }`. */
+    inventory: () => request({ method: "GET", path: "/api/user/inventory" }),
   };
 }

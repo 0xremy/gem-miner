@@ -1,17 +1,16 @@
 # power-upgrade
 
 Buys **Mining Power I** (`upg-power-1`) for every wallet in the Google Sheet
-until its mining power clears the target.
+until its mining power clears the target, or — with `--energy` — raises Energy
+Capacity instead.
 
 Each purchase is a flat **+5 power for 250 gems**, and a wallet starts at
 2 power: 2 → 7 → 12 → … → 62. So `TARGET_POWER=62` is the first stop past 60 —
 12 purchases per wallet, 3,000 gems.
 
 ```
-GET  /api/user/balance              → { gems, miningPower, … }
+GET  /api/user/balance              → { gems, miningPower, energyCapacity, … }
 POST /api/upgrades/upg-power-1      → { success, upgrade: { increment, cost }, user: { miningPower, gems } }
-GET  /api/shop/items                → [ { id, name, price, effect }, … ]   (public)
-POST /api/shop/purchase  {itemId}   → { success, item, user: { gems, miningPower }, inventory }
 POST /api/upgrades/upg-energy-1     → { success, message, upgrade: { increment, cost }, user: { gems, energyCapacity } }
 ```
 
@@ -54,70 +53,47 @@ price is simply unknown. Results print per wallet as they finish, which matters
 here: a funded wallet needs dozens of requests. Leftover gems are normal — that
 is whatever is under the next level's live price.
 
-## Shop items
+## Shop purchase (Mine Cart Mk I)
 
-The same app also buys shop items (`POST /api/shop/purchase` with `{ itemId }`).
-Prices come from the public catalog (`GET /api/shop/items`), so any item id
-works:
+`src/buy.js` is a one-off buy for a shop item, default **Mine Cart Mk I**
+(`mine-cart-1`, gear: +6% loot yield, 4,500 gems). One purchase per wallet:
 
-```powershell
-node src/index.js --list-items                          # what the shop sells
-node src/index.js --items iron-pickaxe --dry-run        # one item, no spend
-node src/index.js --items iron-pickaxe,iron-drill,ruby-laser
-node src/index.js --items iron-pickaxe --count 3        # repeatable items only
+```
+POST /api/shop/purchase  { "itemId": "mine-cart-1" }
+→ { success, item: { id, name, price, … }, user: { gems, … }, inventory: [ … ] }
 ```
 
-Equipment is unique per wallet: buying one it already owns returns
-`400 You already own …`, which is reported as `already owned` and skipped, not
-as a failure. Energy packs are the repeatable kind, so `--count` applies there.
-
-## Mining loop
-
-`--mine` runs the mining pass for every wallet: claim what finished, then keep
-the appointed mine at six digging veins.
-
 ```powershell
-node src/index.js --mine --dry-run          # what would be claimed and armed
-node src/index.js --mine --only 0x…       # one wallet
-node src/index.js --mine --concurrency 8  # the whole sheet
+node src/audit.js                      # who owns it → mine-cart-audit.xlsx
+node src/buy.js --dry-run              # show who would be charged; buys nothing
+node src/buy.js --limit 2              # buy for two wallets (smoke test)
+node src/buy.js --only 0x…,0x…         # specific wallets
+node src/buy.js                        # buy for every wallet that lacks it
+node src/buy.js --item mine-cart-2 --price 12000
 ```
 
-Each mine now holds **six veins**, and every position is tied to one vein and
-one strategy. A pass is:
+Ownership comes from the inventory endpoint, so nobody is charged twice:
 
-1. read the wallet's balance and positions;
-2. claim every finished position (`POST /api/mining/positions/:id/claim`);
-3. for the mine named in the sheet's `Location` column, start the **deep**
-   strategy on every vein that is not digging yet (`POST /api/mining/positions`
-   with `{ locationId, spotId, strategy: "deep" }`), until all six are busy;
-4. only when all six are digging and energy is left over, walk **down** the rank
-   list and fill idle veins there too.
-
-Rank, low → high: `greenstone-quarry`, `crystal-cavern`, `ember-mine`,
-`frozen-depths`, `void-rift`, `molten-core`. A mine that still has idle veins
-after step 3 is reported as `— waiting for the next loop` and left alone, so the
-mode can run on a timer.
-
-`Gear` (column G) is optional and only sent when the cell has a value; the
-payload is `{ locationId, spotId, strategy, gear }`. Deep costs and durations
-come from `GET /api/mining/locations` (e.g. Ember Mine: 63 energy, 13,500 s),
-never from a table in the code.
-
-## Daily and weekly check-in
-
-`--quests` runs both sign-in quests for every wallet — nothing else, no buying:
-
-```powershell
-node src/index.js --quests --dry-run          # what is claimable, arms nothing
-node src/index.js --quests --only 0x…       # one wallet
-node src/index.js --quests --concurrency 8  # the whole sheet, 8 wallets at a time
+```
+GET /api/user/inventory → [ { assetId: "mine-cart-1", name: "Mine Cart Mk I", quantity: 1, … } ]
 ```
 
-A quest is armed with `POST /api/quests/start` and can only be collected after
-its own `delaySeconds` (10 s for both check-ins), so each wallet waits once and
-then claims both with `POST /api/quests/claim`. A wallet that already claimed is
-reported as such with the reset time and pays nothing, so re-running is safe.
-Rewards are worth 75 gems daily and 450 weekly.
+`src/buy.js` reads that list first and skips a wallet that already holds the
+item (`= … already owns`), then buys only the rest. A 400 from the shop is still
+classified the same way in case the inventory read is unavailable. `--price`
+(or `SHOP_ITEM_PRICE`) only pre-skips wallets that clearly cannot pay and
+describes the dry run; a live purchase reports the real price from its
+response, and the balance is re-read afterwards to confirm the gems spent.
+
+`src/audit.js` is the read-only report: one row per sheet row with name,
+address, whether the item is owned, quantity, gems, whether they can afford it,
+the proxy used, and any error — plus a summary tab. Nothing is bought. Rows are
+filterable in Excel, so "Owns item = no" shows exactly who is left to buy for.
+Add `--out report.xlsx` for another path.
+
+Both tools accept `--only a,b`, `--limit n`, `--concurrency n`, `--no-proxy`,
+and `--fallback-direct`, which retries a wallet whose proxy refuses the tunnel
+over your own IP (the row is labelled `direct fallback` in the report).
 
 ## Setup
 
@@ -152,10 +128,10 @@ spaces ignored. Required:
 | `Token` (or `Bearer`) | the wallet's auth token |
 | `Proxy` (or `Proxies`, `Proxy URL`) | optional, `host:port::user:pass`, `host:port:user:pass`, `socks5://host:port:user:pass` or `socks5://user:pass@host:port`; every request for that wallet leaves through it |
 | `Name` (or `Wallet`, `Profile`) | optional label for the output |
-| `Location` (or `Mine`) | optional, the mine `--mine` keeps at six veins; blank means `greenstone-quarry` |
-| `Gear` (or `Loadout`) | optional, sent as `gear` when starting a vein |
 
-Rows without a valid `0x…` address in that column are skipped.
+Other columns (`Location`, `Gear`, `Social Daily`, …) are read by the dashboard
+service, not by this tool, and are ignored here. Rows without a valid `0x…`
+address in the address column are skipped.
 
 **4. The credentials.** Create a Google Cloud service account, enable the
 **Google Sheets API**, download its JSON key, then share the spreadsheet with
@@ -195,12 +171,12 @@ node src/index.js --limit 2      # upgrade only two wallets (smoke test)
 node src/index.js --only 0x…     # one wallet
 node src/index.js                # every wallet in the sheet
 node src/index.js --target 100   # a different stop point
+node src/index.js --energy       # Energy Capacity instead of Mining Power
 ```
 
 Options: `--dry-run`, `--only <address>`, `--limit <n>`, `--target <power>`,
-`--energy`, `--items <ids>`, `--count <n>`, `--list-items`, `--quests`, `--mine`,
-`--no-proxy`, `--concurrency <n>`, `--help`. The modes `--quests`, `--mine`,
-`--items` and `--energy` cannot be combined.
+`--energy`, `--no-proxy`, `--concurrency <n>`, `--help`. `--energy` is the only
+extra mode; mining is the dashboard's job (`src/` at the repo root).
 
 Output per wallet:
 

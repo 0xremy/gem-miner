@@ -8,7 +8,7 @@ they can share is the Google Sheet.
 |---|---|---|---|
 | Dashboard ("mother") | repo root (`src/`) | Web UI: positions, mining, claims, side quests | No |
 | Token refresher | `token-refresher/` | Logs wallets in with seed phrases, writes fresh JWTs | **Yes** — the `Token` column |
-| Power upgrade | `power-upgrade/` | Buys mining power, energy capacity and shop items | No |
+| Power upgrade | `power-upgrade/` | Buys mining power (default), energy capacity (`--energy`) or a shop item (`src/buy.js`), and reports shop ownership as `.xlsx` (`src/audit.js`) | No |
 
 Every app loads `.env` from its own folder, and a **real environment variable always
 wins** over the file. `.env` is gitignored in all three; create each one from that
@@ -130,6 +130,7 @@ Config file: **`power-upgrade/.env`**. Template: `power-upgrade/.env.example`.
 | `TARGET_POWER` | stop once mining power reaches this, default `62` (first stop past 60) |
 | `UPGRADE_ID` / `UPGRADE_COST` / `UPGRADE_INCREMENT` | Mining Power I, used for the dry-run plan |
 | `ENERGY_UPGRADE_ID` / `ENERGY_INCREMENT` | Energy Capacity I, defaults `upg-energy-1` / `20` |
+| `SHOP_ITEM_ID` / `SHOP_ITEM_PRICE` | item bought by `src/buy.js`, defaults `mine-cart-1` / `4500` |
 | `CONCURRENCY` | parallel wallets, default 3 |
 | `AUTH_RETRIES` | retries on 429/5xx, default 3 |
 | `GEM_BASE_URL` | defaults to `https://gemapi.bullshot.io` |
@@ -151,23 +152,16 @@ node src/index.js --dry-run --limit 2   # read balances, buy nothing
 node src/index.js                       # power up to TARGET_POWER
 node src/index.js --energy --dry-run    # balances only — the price is unknown before buying
 node src/index.js --energy              # buy energy until refused
-node src/index.js --list-items          # what the shop sells
-node src/index.js --items iron-pickaxe  # then buy by id (comma-separate for several)
-node src/index.js --quests              # daily + weekly check-in
-node src/index.js --mine --dry-run      # what would be claimed and re-armed
-node src/index.js --mine                # claim finished veins, arm all 6 deep
+node src/audit.js                       # shop: who owns Mine Cart Mk I → mine-cart-audit.xlsx
+node src/buy.js --dry-run               # shop: who would be charged
+node src/buy.js                         # shop: buy it for every wallet that lacks it
 ```
 
-Also available: `--only <address>`, `--limit <n>`, `--concurrency <n>`, `--no-proxy`,
-and `--count <n>` for repeatable items. `--quests`, `--mine`, `--items` and `--energy`
-are separate modes and cannot be combined.
-
-`--mine` reads the mine from the sheet's `Location` column (and an optional `Gear`
-value from column G). Each mine has six veins; a pass claims every finished position,
-then starts the `deep` strategy on all six veins of the appointed mine. Only when all
-six are digging does it spill leftover energy into lower-rank mines. A mine that still
-has idle veins is reported and tried again on the next pass, so the mode is safe to
-run on a timer.
+Also available: `--only <address[,address]>`, `--limit <n>`, `--concurrency <n>`, `--no-proxy`,
+`--fallback-direct` (retry a wallet whose proxy is down over your own IP).
+`--energy` is the only extra upgrade mode, and `src/buy.js` is a separate one-off
+shop purchase; mining, claims and side quests belong to the dashboard (section 1),
+so this tool never touches positions or quests.
 
 ---
 
